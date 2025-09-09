@@ -1,0 +1,15 @@
+{
+  "name": "algoscape-functions-sample",
+  "private": true,
+  "engines": {
+    "node": "18"
+  },
+  "main": "index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "firebase-functions": "^4.8.0",
+    "firebase-admin": "^12.0.0",
+    "node-fetch": "2.6.7",
+    "cors": "^2.8.5"
+  }
+}
