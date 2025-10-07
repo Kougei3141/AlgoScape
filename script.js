@@ -223,10 +223,15 @@ async function callGeminiAPI(promptContent, isGamePrompt = false) {
     if (!geminiApiKey) {
         throw new Error('APIキーが設定されていません。');
     }
-    const MODEL_NAME = "gemini-1.5-flash-latest";
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
 
-    const contentsToSend = Array.isArray(promptContent) ? promptContent : [{ role: "user", parts: [{ text: promptContent }] }];
+    // ✅ 最新モデルに変更
+    const MODEL_NAME = "gemini-1.5-flash";
+    // ✅ v1 エンドポイントに変更
+    const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
+
+    const contentsToSend = Array.isArray(promptContent)
+        ? promptContent
+        : [{ role: "user", parts: [{ text: promptContent }] }];
 
     const requestBody = {
         contents: contentsToSend,
@@ -237,16 +242,10 @@ async function callGeminiAPI(promptContent, isGamePrompt = false) {
             { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
         ],
         generationConfig: {
-            temperature: isGamePrompt ? 0.5 : 0.75
+            temperature: isGamePrompt ? 0.5 : 0.75,
+            maxOutputTokens: isGamePrompt ? 200 : 250
         }
     };
-
-    if (!isGamePrompt) {
-        const currentPhaseIndex = Object.keys(PHASES_CONFIG).indexOf(aiState.phase_name);
-        requestBody.generationConfig.maxOutputTokens = Math.min(250, 20 + currentPhaseIndex * 15);
-    } else {
-        requestBody.generationConfig.maxOutputTokens = 200;
-    }
 
     try {
         const response = await fetch(API_URL, {
@@ -255,27 +254,25 @@ async function callGeminiAPI(promptContent, isGamePrompt = false) {
             body: JSON.stringify(requestBody)
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: { message: "不明なAPIエラー" } }));
-            let message = `API呼び出しエラー: ${response.status}`;
-            if (errorData.error && errorData.error.message) {
-                message += ` - ${errorData.error.message}`;
-                if (errorData.error.message.toLowerCase().includes("api key not valid")) {
-                    throw new Error('APIキーが無効です。正しいキーを設定し直してください。');
-                }
-            }
-            throw new Error(message);
-        }
-
         const data = await response.json();
 
-        if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-            return data.candidates[0].content.parts[0].text;
-        } else if (data.candidates?.[0]?.finishReason === "SAFETY") {
-            return isGamePrompt ? "ERROR_SAFETY_BLOCK" : `うーん、ちょっとこわいことかな？${AI_NAME}、よくわからないぷぷ。ちがうおはなししよ！ (セーフティ機能)`;
-        } else {
-            throw new Error('APIからの応答が空か、予期しない形式です。');
+        if (!response.ok) {
+            const msg = data?.error?.message || "不明なAPIエラー";
+            throw new Error(`API呼び出しエラー: ${response.status} - ${msg}`);
         }
+
+        const output = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (output) return output;
+
+        if (data.candidates?.[0]?.finishReason === "SAFETY") {
+            return isGamePrompt
+                ? "ERROR_SAFETY_BLOCK"
+                : `うーん、ちょっとこわいことかな？${AI_NAME}、よくわからないぷぷ。ちがうおはなししよ！（セーフティ機能）`;
+        }
+
+        throw new Error('APIからの応答が空か、予期しない形式です。');
+
     } catch (error) {
         console.error("callGeminiAPI Error:", error);
         throw error;
@@ -1172,5 +1169,6 @@ function initialize() {
 
     updateDisplay();
 }
+
 
 document.addEventListener('DOMContentLoaded', initialize);
