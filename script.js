@@ -223,7 +223,8 @@ async function callGeminiAPI(promptContent, isGamePrompt = false) {
         throw new Error('APIキーが設定されていません。');
     }
 
-    const MODEL_NAME = "gemini-1.5-flash-001";
+    // ✅ 最新仕様に合わせて修正
+    const MODEL_NAME = "gemini-1.5-flash";
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
 
     const contentsToSend = Array.isArray(promptContent)
@@ -232,40 +233,34 @@ async function callGeminiAPI(promptContent, isGamePrompt = false) {
 
     const requestBody = {
         contents: contentsToSend,
-        safetySettings: [
-            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
-            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
-        ],
         generationConfig: {
             temperature: isGamePrompt ? 0.5 : 0.75,
             maxOutputTokens: isGamePrompt ? 200 : 250
         }
     };
 
-    const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-    });
+    try {
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
 
-    const data = await response.json();
-    if (!response.ok) {
-        const msg = data?.error?.message || "不明なAPIエラー";
-        throw new Error(`API呼び出しエラー: ${response.status} - ${msg}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            const msg = data?.error?.message || "不明なAPIエラー";
+            throw new Error(`API呼び出しエラー: ${response.status} - ${msg}`);
+        }
+
+        const output = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (output) return output;
+
+        throw new Error('APIからの応答が空か、予期しない形式です。');
+    } catch (error) {
+        console.error("callGeminiAPI Error:", error);
+        throw error;
     }
-
-    const output = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (output) return output;
-
-    if (data.candidates?.[0]?.finishReason === "SAFETY") {
-        return isGamePrompt
-            ? "ERROR_SAFETY_BLOCK"
-            : `うーん、ちょっとこわいことかな？${AI_NAME}、よくわからないぷぷ。ちがうおはなししよ！（セーフティ機能）`;
-    }
-
-    throw new Error('APIからの応答が空か、予期しない形式です。');
 }
 
 
@@ -1161,4 +1156,5 @@ function initialize() {
 
 
 document.addEventListener('DOMContentLoaded', initialize);
+
 
