@@ -266,4 +266,21 @@ body {
     width: 20px; height: 20px;
     position: absolute;
     font-size: 16px;
+
     display: fle
+
+/* === 共通ナビボタン === */
+.control-btn, .nav-btn {
+  padding: 10px 15px;
+  background: #f48fb1;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.2s ease;
+  font-size: 0.9em;
+}
+.control-btn:hover, .nav-btn:hover {
+  background: #ec407a;
+  transform: translateY(-1px);
+}
