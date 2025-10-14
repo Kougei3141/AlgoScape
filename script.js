@@ -218,13 +218,15 @@ function checkPhaseTransition() {
 }
 
 
+// --- Gemini API呼び出し ---
 async function callGeminiAPI(promptContent, isGamePrompt = false) {
     if (!geminiApiKey) {
         throw new Error('APIキーが設定されていません。');
     }
 
-    // ✅ 最新仕様に合わせて修正
-    const MODEL_NAME = "gemini-1.5-flash";
+    // ✅ 最新の安定版モデルを使用
+    const MODEL_NAME = "gemini-2.5-flash";  
+    // ✅ v1beta エンドポイントが正しい
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
 
     const contentsToSend = Array.isArray(promptContent)
@@ -247,7 +249,6 @@ async function callGeminiAPI(promptContent, isGamePrompt = false) {
         });
 
         const data = await response.json();
-
         if (!response.ok) {
             const msg = data?.error?.message || "不明なAPIエラー";
             throw new Error(`API呼び出しエラー: ${response.status} - ${msg}`);
@@ -262,6 +263,7 @@ async function callGeminiAPI(promptContent, isGamePrompt = false) {
         throw error;
     }
 }
+
 
 
 // --- UI更新 ---
@@ -1156,5 +1158,6 @@ function initialize() {
 
 
 document.addEventListener('DOMContentLoaded', initialize);
+
 
 
