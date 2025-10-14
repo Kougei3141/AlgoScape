@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>💭 思考モード - ぷぷの頭の中</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body {
+      background: radial-gradient(circle at center, #ffe5ec 0%, #fce1ef 60%, #ffd6e0 100%);
+      color: #444;
+      text-align: center;
+    }
+    canvas {
+      border-radius: 15px;
+      box-shadow: 0 0 15px rgba(255, 182, 193, 0.5);
+      margin-top: 20px;
+    }
+    .nav-btn {
+      margin-top: 15px;
+      background: #ff758c;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .nav-btn:hover { background: #ec407a; }
+  </style>
+</head>
+<body>
+  <h1>💭 ぷぷの思考モード</h1>
+  <p>今まで覚えた言葉が、ぷぷの頭の中を飛び回るよ！</p>
+
+  <canvas id="thinkingCanvas" width="600" height="400"></canvas>
+
+  <div>
+    <button class="nav-btn" onclick="location.href='index.html'">🏠 戻る</button>
+    <button class="nav-btn" onclick="refreshThinking()">🔄 更新</button>
+  </div>
+
+  <script src="pupu_core.js"></script>
+  <script src="thinking.js"></script>
+</body>
+</html>
