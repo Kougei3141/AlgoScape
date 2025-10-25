@@ -11,6 +11,7 @@
         <div class="header">
             <h1 class="title">💖 成長するドラゴンAI「ぷぷ」</h1>
             <p>語彙と表現力で進化するピンクドラゴン「ぷぷ」とお話ししよう！</p>
+            <p>AIzaSyBPuld1oRtLM-_3OdOKzD4sx3pqAZLvELk</p>
         </div>
 
         <div class="api-setup" id="apiSetup">
@@ -49,30 +50,21 @@
             </div>
         </div>
 
-        <!-- 🐲 ぷぷキャラクターエリア -->
         <div class="ai-character-display" id="aiCharacterDisplayArea" style="display: none;">
             <img id="aiCharacterImage" src="assets/pupu_phase1.png" alt="ぷぷキャラクター">
-
-            <!-- 🧠 思考バブル（AIが考えている単語） -->
-            <div id="thinkingBubbles" class="thinking-bubbles" style="display:none;"></div>
-
-            <!-- 💬 ぷぷのセリフ吹き出し -->
             <div id="aiSpeechBubble" class="speech-bubble" style="display:none;">
                 <p id="aiSpeechText"></p>
             </div>
         </div>
 
-        <!-- 💬 チャットログ -->
         <div class="chat-area" id="chatArea"></div>
         <div id="loading" class="loading-indicator" style="display: none;">ぷぷ考え中... 🤔</div>
 
-        <!-- 📝 入力欄 -->
         <div class="input-area">
             <input type="text" class="input-field" id="userInput" placeholder="ぷぷに話しかけてね..." disabled>
             <button class="send-btn" id="sendButton" disabled>送信</button>
         </div>
 
-        <!-- 🎮 コントロールボタン -->
         <div class="controls">
             <button class="control-btn" id="statusButton">📊 詳細ステータス</button>
             <button class="control-btn" id="resetButton">🔄 リセット</button>
@@ -84,7 +76,6 @@
         </div>
     </div>
 
-    <!-- 🎉 進化お祝いモーダル -->
     <div class="celebration" id="celebrationModal">
         <h2>🎉 おめでとう！</h2>
         <div id="celebrationPhaseIcon" class="phase-icon-large"></div>
@@ -93,7 +84,6 @@
         <button id="closeCelebrationBtn" style="margin-top: 15px; padding: 10px 20px; background: #ff758c; color: white; border: none; border-radius: 5px; cursor: pointer;">わかった！</button>
     </div>
 
-    <!-- 🎮 ミニゲームモーダル -->
     <div id="miniGameModal" class="modal-overlay">
         <div class="modal-content">
             <button id="closeMiniGameBtn">×</button>
@@ -102,7 +92,6 @@
         </div>
     </div>
 
-    <!-- 🧩 ミニゲームテンプレート：ことば集め -->
     <template id="wordCollectGameTemplate">
         <p>テーマ: <span id="wordCollectTheme"></span></p>
         <p>制限時間: <span id="wordCollectTimeLeft">30</span>秒 | スコア: <span id="wordCollectScore">0</span></p>
@@ -110,7 +99,6 @@
         <p id="wordCollectMessage" style="margin-top:10px; color: #c2185b; font-weight:bold;"></p>
     </template>
 
-    <!-- 🧭 ミニゲームテンプレート：アルゴスケイプ -->
     <template id="errandGameTemplate">
         <p id="errandObjective">目的: </p>
         <div id="errandMapArea">
@@ -125,7 +113,6 @@
         <p id="errandMessage" style="margin-top:10px; color: #0288d1; font-weight:bold;"></p>
     </template>
 
-    <!-- 🔤 ミニゲームテンプレート：しりとり -->
     <template id="shiritoriGameTemplate">
         <p>前の言葉: <strong id="shiritoriPrevWord">しりとり</strong></p>
         <p id="shiritoriTurnIndicator" style="font-style: italic; color: #7b1fa2; margin: 5px 0;"></p>
@@ -139,4 +126,5 @@
 
     <script src="script.js"></script>
 </body>
+
 </html>
