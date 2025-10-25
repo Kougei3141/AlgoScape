@@ -1,57 +1,131 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>💖 成長するドラゴンAI「ぷぷ」</title>
-  <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>💖 成長するドラゴンAI「ぷぷ」</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <h1 class="title">💖 成長するドラゴンAI「ぷぷ」</h1>
-      <p>語彙と表現力で進化するピンクドラゴン「ぷぷ」とお話ししよう！</p>
-    </div>
-
-    <div class="status-panel">
-      <div class="phase-indicator" id="phaseIcon">🥚</div>
-      <div class="phase-name" id="phaseName">たまごドラゴン</div>
-      <div class="stats">
-        <div class="stat">
-          <div class="stat-value" id="loveCount">0</div>
-          <div class="stat-label">愛情度</div>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">💖 成長するドラゴンAI「ぷぷ」</h1>
+            <p>語彙と表現力で進化するピンクドラゴン「ぷぷ」とお話ししよう！</p>
+            <p>AIzaSyBPuld1oRtLM-_3OdOKzD4sx3pqAZLvELk</p>
         </div>
-        <div class="stat">
-          <div class="stat-value" id="vocabCount">0</div>
-          <div class="stat-label">語彙数</div>
+
+        <div class="api-setup" id="apiSetup">
+            <h3>🔑 Gemini API キーの設定</h3>
+            <p>Google AI StudioでGemini APIキーを取得して入力してください。</p>
+            <input type="password" class="api-input" id="apiKeyInput" placeholder="Gemini APIキーを入力...">
+            <button class="api-btn" id="saveApiKeyBtn">保存して開始</button>
+            <p style="font-size: 0.9em; color: #666; margin-top: 10px;">
+                APIキーはブラウザのローカルストレージに保存されます。
+            </p>
         </div>
-        <div class="stat">
-          <div class="stat-value" id="responseCount">0</div>
-          <div class="stat-label">会話回数</div>
+
+        <div class="status-panel">
+            <div class="phase-indicator" id="phaseIcon">🥚</div>
+            <div class="phase-name" id="phaseName">たまごドラゴン</div>
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-value" id="loveCount">0</div>
+                    <div class="stat-label">愛情度</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="vocabCount">0</div>
+                    <div class="stat-label">語彙数</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="responseCount">0</div>
+                    <div class="stat-label">会話回数</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="structureLevel">1</div>
+                    <div class="stat-label">構文レベル</div>
+                </div>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
         </div>
-      </div>
+
+        <div class="ai-character-display" id="aiCharacterDisplayArea" style="display: none;">
+            <img id="aiCharacterImage" src="assets/pupu_phase1.png" alt="ぷぷキャラクター">
+            <div id="aiSpeechBubble" class="speech-bubble" style="display:none;">
+              <div id="thinkingBubbles" class="thinking-bubbles" style="display:none;">
+                <p id="aiSpeechText"></p>
+            </div>
+        </div>
+
+        <div class="chat-area" id="chatArea"></div>
+        <div id="loading" class="loading-indicator" style="display: none;">ぷぷ考え中... 🤔</div>
+
+        <div class="input-area">
+            <input type="text" class="input-field" id="userInput" placeholder="ぷぷに話しかけてね..." disabled>
+            <button class="send-btn" id="sendButton" disabled>送信</button>
+        </div>
+
+        <div class="controls">
+            <button class="control-btn" id="statusButton">📊 詳細ステータス</button>
+            <button class="control-btn" id="resetButton">🔄 リセット</button>
+            <button class="control-btn" id="teachButton">📚 単語を教える</button>
+            <button class="control-btn" id="showApiSetupBtn">🔑 APIキー設定</button>
+            <button class="control-btn" id="startGame1Btn">ことば集め</button>
+            <button class="control-btn" id="startGame2Btn">アルゴスケイプ</button>
+            <button class="control-btn" id="startGame3Btn">しりとり</button>
+        </div>
     </div>
 
-    <div class="ai-character-display" id="aiCharacterDisplayArea">
-      <img id="aiCharacterImage" src="assets/pupu_phase1.png" alt="ぷぷキャラクター">
-
-      <!-- 🧠 思考バブル表示エリア（新規追加） -->
-      <div id="thinkingBubbles" class="thinking-bubbles" style="display:none;"></div>
-
-      <div id="aiSpeechBubble" class="speech-bubble" style="display:none;">
-        <p id="aiSpeechText"></p>
-      </div>
+    <div class="celebration" id="celebrationModal">
+        <h2>🎉 おめでとう！</h2>
+        <div id="celebrationPhaseIcon" class="phase-icon-large"></div>
+        <p id="celebrationText"></p>
+        <ul id="celebrationFeatures" class="features-list"></ul>
+        <button id="closeCelebrationBtn" style="margin-top: 15px; padding: 10px 20px; background: #ff758c; color: white; border: none; border-radius: 5px; cursor: pointer;">わかった！</button>
     </div>
 
-    <div class="chat-area" id="chatArea"></div>
-    <div id="loading" class="loading-indicator" style="display: none;">ぷぷ考え中... 🤔</div>
-
-    <div class="input-area">
-      <input type="text" class="input-field" id="userInput" placeholder="ぷぷに話しかけてね..." disabled>
-      <button class="send-btn" id="sendButton" disabled>送信</button>
+    <div id="miniGameModal" class="modal-overlay">
+        <div class="modal-content">
+            <button id="closeMiniGameBtn">×</button>
+            <h3 id="miniGameTitle">ミニゲームタイトル</h3>
+            <div id="miniGameArea"></div>
+        </div>
     </div>
-  </div>
 
-  <script src="script.js"></script>
+    <template id="wordCollectGameTemplate">
+        <p>テーマ: <span id="wordCollectTheme"></span></p>
+        <p>制限時間: <span id="wordCollectTimeLeft">30</span>秒 | スコア: <span id="wordCollectScore">0</span></p>
+        <div id="wordCollectObjectsArea"></div>
+        <p id="wordCollectMessage" style="margin-top:10px; color: #c2185b; font-weight:bold;"></p>
+    </template>
+
+    <template id="errandGameTemplate">
+        <p id="errandObjective">目的: </p>
+        <div id="errandMapArea">
+            <div id="errandPlayer">🐲</div>
+        </div>
+        <div id="errandControls" style="margin-top:10px;">
+            <button data-direction="up">↑</button>
+            <button data-direction="down">↓</button>
+            <button data-direction="left">←</button>
+            <button data-direction="right">→</button>
+        </div>
+        <p id="errandMessage" style="margin-top:10px; color: #0288d1; font-weight:bold;"></p>
+    </template>
+
+    <template id="shiritoriGameTemplate">
+        <p>前の言葉: <strong id="shiritoriPrevWord">しりとり</strong></p>
+        <p id="shiritoriTurnIndicator" style="font-style: italic; color: #7b1fa2; margin: 5px 0;"></p>
+        <div>
+            <input type="text" id="shiritoriUserInput" placeholder="次の言葉を入力...">
+            <button id="shiritoriSubmitBtn">決定</button>
+        </div>
+        <p id="shiritoriMessage" style="margin-top:10px; color: #c2185b; font-weight:bold;"></p>
+        <ul id="shiritoriHistory"></ul>
+    </template>
+
+    <script src="script.js"></script>
 </body>
+
 </html>
