@@ -3,6 +3,8 @@ const AI_NAME = "ぷぷ";
 const STORAGE_KEY_STATE = 'pupuAiState_v2'; // 愛情度追加に合わせてバージョンアップ
 const STORAGE_KEY_API_KEY = 'pupuGeminiApiKey_v1';
 const GAME_NAME_ERRAND = "アルゴスケイプ";
+let thinkingTimer = null;
+
 
 // --- グローバル変数 ---
 let geminiApiKey = '';
@@ -216,7 +218,14 @@ function checkPhaseTransition() {
     }
     return { changed: false };
 }
-
+// 💡 AIが考える材料（ユーザーの入力＋学習済み語彙の一部）
+const seedTokens = [
+  ...getSimpleWordsFromText(userText).slice(0, 4),
+  ...Object.keys(aiState.vocabulary)
+    .filter(w => aiState.vocabulary[w].mastered)
+    .slice(0, 4)
+];
+showThinkingAnimation(seedTokens);
 
 // --- Gemini API呼び出し ---
 async function callGeminiAPI(promptContent, isGamePrompt = false) {
@@ -424,6 +433,7 @@ async function sendMessage() {
         aiSpeechText.textContent = `あれれ？${AI_NAME}、こまっちゃったみたい…`;
     } finally {
         loadingIndicator.style.display = 'none';
+        stopThinkingAnimation();
         sendButton.disabled = false;
         userInput.disabled = false;
         updateDisplay();
@@ -1159,4 +1169,24 @@ function initialize() {
 
 document.addEventListener('DOMContentLoaded', initialize);
 
+
+function showThinkingAnimation(tokens = []) {
+  const wrap = document.getElementById('thinkingBubbles');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  wrap.style.display = tokens.length ? 'flex' : 'none';
+  tokens.slice(0, 8).forEach(t => {
+    const chip = document.createElement('span');
+    chip.className = 'bubble-chip';
+    chip.textContent = t;
+    wrap.appendChild(chip);
+  });
+}
+
+function stopThinkingAnimation() {
+  const wrap = document.getElementById('thinkingBubbles');
+  if (!wrap) return;
+  wrap.style.display = 'none';
+  wrap.innerHTML = '';
+}
 
