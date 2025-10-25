@@ -1,71 +1,55 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>💖 成長するドラゴンAI「ぷぷ」</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pupu Core v1 — 語彙記録＆共有ベース</title>
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <div class="container">
-    <div class="header">
-      <h1 class="title">💖 成長するドラゴンAI「ぷぷ」</h1>
-      <p>語彙と表現力で進化するピンクドラゴン「ぷぷ」とお話ししよう！</p>
-        <p>AIzaSyBPuld1oRtLM-_3OdOKzD4sx3pqAZLvELk</p>
-    </div>
+    <header class="header">
+      <h1 class="title">🐉 ぷぷ・コア（語彙記録 & 共有）</h1>
+      <p>最小構成：語彙の <strong>count / firstAt / lastAt / category</strong> を保存し、全ページで共有</p>
+    </header>
 
-    <!-- Gemini APIキー設定 -->
-    <div class="api-setup" id="apiSetup">
-      <h3>🔑 Gemini API キーの設定</h3>
-      <input type="password" class="api-input" id="apiKeyInput" placeholder="Gemini APIキーを入力...">
-      <button class="api-btn" id="saveApiKeyBtn">保存して開始</button>
-      <p style="font-size: 0.9em; color: #666;">APIキーはブラウザに安全に保存されます。</p>
-    </div>
-
-    <!-- ステータス -->
-    <div class="status-panel">
+    <section class="status-panel">
       <div class="phase-indicator" id="phaseIcon">🥚</div>
-      <div class="phase-name" id="phaseName">たまごドラゴン</div>
+      <div class="phase-name"><span id="phaseName">たまごドラゴン</span></div>
       <div class="stats">
-        <div class="stat"><div id="loveCount" class="stat-value">0</div><div class="stat-label">愛情度</div></div>
-        <div class="stat"><div id="vocabCount" class="stat-value">0</div><div class="stat-label">語彙数</div></div>
-        <div class="stat"><div id="responseCount" class="stat-value">0</div><div class="stat-label">会話回数</div></div>
+        <div class="stat">
+          <div class="stat-value" id="loveCount">0</div>
+          <div class="stat-label">愛情度</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="vocabCount">0</div>
+          <div class="stat-label">語彙数</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="masteredCount">0</div>
+          <div class="stat-label">マスター語彙</div>
+        </div>
       </div>
-      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-    </div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+    </section>
 
-    <!-- ぷぷキャラ -->
-    <div class="ai-character-display" id="aiCharacterDisplayArea" style="display:none;">
-      <img id="aiCharacterImage" src="assets/pupu_phase1.png" alt="ぷぷ">
-      <div id="aiSpeechBubble" class="speech-bubble" style="display:none;">
-        <p id="aiSpeechText"></p>
-      </div>
-    </div>
+    <section class="chat-area" id="chatArea" aria-live="polite"></section>
 
-    <!-- チャット -->
-    <div id="chatArea" class="chat-area"></div>
-    <div id="loading" class="loading-indicator" style="display:none;">ぷぷ考え中... 🤔</div>
+    <section class="input-area">
+      <input id="userInput" class="input-field" placeholder="テキストを入力（語彙を自動抽出・記録）" />
+      <button id="sendButton" class="send-btn">記録</button>
+    </section>
 
-    <div class="input-area">
-      <input id="userInput" class="input-field" type="text" placeholder="ぷぷに話しかけてね..." disabled>
-      <button id="sendButton" class="send-btn" disabled>送信</button>
-    </div>
-
-    <!-- コントロール -->
-    <div class="controls">
-      <button class="control-btn" id="statusButton">📊 詳細ステータス</button>
-      <button class="control-btn" id="resetButton">🔄 リセット</button>
-      <button class="control-btn" id="teachButton">📚 単語を教える</button>
-      <button class="control-btn" id="showApiSetupBtn">🔑 APIキー設定</button>
-
-      <!-- 🧠 新しいナビゲーション -->
-      <button class="control-btn" onclick="location.href='thinking.html'">💭 思考モード</button>
-      <button class="control-btn" onclick="location.href='forest.html'">🌳 学習の森</button>
-      <button class="control-btn" onclick="location.href='lab.html'">🔬 生成ラボ</button>
-    </div>
+    <section class="controls">
+      <button id="teachButton" class="control-btn">単語を教える</button>
+      <button id="statusButton" class="control-btn">詳細ステータス</button>
+      <button id="resetButton" class="control-btn">すべてリセット</button>
+    </section>
   </div>
 
-  <script src="script.js"></script>
+  <!-- ステータスモーダル（JSで生成） -->
+
+  <script src="./pupu_state.js"></script>
+  <script src="./script.js"></script>
 </body>
 </html>
-
