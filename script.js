@@ -1,6 +1,3 @@
-了解。修正を反映した**完全版（script.js）**です—そのまま置き換えてください。
-
-```javascript
 // --- グローバル定数 ---
 const AI_NAME = "ぷぷ";
 const STORAGE_KEY_STATE = 'pupuAiState_v3'; // v2→v3: traits/xp/学習可視化を導入
@@ -1205,3 +1202,4 @@ function initialize() {
 
 document.addEventListener('DOMContentLoaded', initialize);
 ```
+
