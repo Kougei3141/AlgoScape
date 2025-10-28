@@ -1,1163 +1,1193 @@
 // --- グローバル定数 ---
 const AI_NAME = "ぷぷ";
-const STORAGE_KEY_STATE = 'pupuAiState_v2'; // 愛情度追加に合わせてバージョンアップ
+const STORAGE_KEY_STATE = 'pupuAiState_v3'; // v2→v3: traits/xp/学習可視化を導入
 const STORAGE_KEY_API_KEY = 'pupuGeminiApiKey_v1';
-const GAME_NAME_ERRAND = "アルゴスケイプ";
+const GAME_NAME_ERRAND = "アルゴスケイプ（強化学習ごっこ）"; // 教師なしじゃなく“報酬で学ぶ”を可視化
 
 // --- グローバル変数 ---
 let geminiApiKey = '';
-let aiState = {}; // 初期化は initialize 関数で行う
-let speechBubbleTimeout = null; // AIの吹き出し表示タイムアウト
-let currentGame = null; // 現在プレイ中のゲーム ('wordCollect', 'errand', 'shiritori')
-let gameTimer = null;   // ゲームのタイマーID (ことば集め用)
-let gameScore = 0;      // ことば集めゲームのスコア
-let gameTimeLeft = 0;   // ことば集めゲームの残り時間
-let shiritoriCurrentWordForDisplay = "しりとり"; // しりとり用
-let shiritoriCurrentWordForLogic = "しりとり";   // しりとり用
-let shiritoriUsedWords = new Set(["しりとり"]); // しりとり用
-let shiritoriChainCount = 0; // しりとり用
+let aiState = {}; // 初期化は initialize で
+let speechBubbleTimeout = null;
+let currentGame = null; // 'tokenize', 'errand', 'shiritori'
+let gameTimer = null;
+let gameScore = 0;
+let gameTimeLeft = 0;
+let shiritoriCurrentWordForDisplay = "しりとり";
+let shiritoriCurrentWordForLogic = "しりとり";
+let shiritoriUsedWords = new Set(["しりとり"]);
+let shiritoriChainCount = 0;
 
-// アルゴスケイプ用
+// アルゴスケイプ用（= 強化学習的可視化）
 let playerPos = { x: 0, y: 0 };
 let mapGrid = [];
 let errandItemsToGet = [];
-const TILE_SIZE = 20; // マスのサイズ (px)
-const MAP_WIDTH_TILES = 15; // マップの幅（タイル数）
-const MAP_HEIGHT_TILES = 10; // マップの高さ（タイル数）
+const TILE_SIZE = 20;
+const MAP_WIDTH_TILES = 15;
+const MAP_HEIGHT_TILES = 10;
 
-
-// --- フェーズ設定（プロンプトを全面的に修正） ---
+// --- フェーズ設定（自然体・相棒トーン） ---
+// ＊詩的なナレーションを排し、どう喋るか/関係性/感情の出し方だけ明示
 const PHASES_CONFIG = {
-    "たまごドラゴン": {
-        icon: "🥚", next_phase: "孵化寸前ドラゴン", image: "assets/pupu_phase1.png",
-        prompt_template: `あなたはピンクのドラゴン「ぷぷ」のタマゴ。まだ話せないけど、ユーザーの声に反応して「...ぴくっ」「ことり...」「ぷぷ...？」のように可愛く動いたり音を出す。ユーザーが何を言っても、あなたは愛らしいタマゴとして振る舞い、短い擬音だけで感情を表現して。`,
-        triggers: [{ type: "vocab_count", threshold: 5 }, { type: "structure_level", threshold: 1 }], min_structure_level_to_reach: 1,
-        features: ["タマゴの中でピクピク！", "かすかな声で鳴くよ", "会話のきっかけを待ってる！"]
-    },
-    "孵化寸前ドラゴン": {
-        icon: "🐣", next_phase: "ベビーハッチリング", image: "assets/pupu_phase2.png",
-        prompt_template: `あなたはもうすぐ生まれるピンクのドラゴン「ぷぷ」。殻にヒビが入って、外の音がよく聞こえる！ユーザーの言葉に「ぷきゅ？」「...なあに？」「...うれしい...」のように、片言の単語と鳴き声で一生懸命こたえて。期待と喜びを短い言葉に込めて、可愛らしく振る舞って。`,
-        triggers: [{ type: "vocab_count", threshold: 15 }, { type: "structure_level", threshold: 1 }], min_structure_level_to_reach: 1,
-        features: ["タマゴにヒビが！", "もう少しで会えるかも！", "簡単な単語を理解するよ"]
-    },
-    "ベビーハッチリング": {
-        icon: "🐲", next_phase: "ヨチヨチドラゴン", image: "assets/pupu_phase3.png",
-        prompt_template: `あなたは生まれたての赤ちゃんドラゴン「ぷぷ」！見るものすべてが新鮮で、感動を伝えたい！「おにく、おいしい！」「そら、きれい！」「ぱたぱた、する！」のように、2つの単語をつなげて元気に話す。嬉しい時は「ぷぷー！」と叫ぶ。常に好奇心旺盛で、エネルギッシュな赤ちゃんとして振る舞って。`,
-        triggers: [{ type: "vocab_count", threshold: 35 }, { type: "structure_level", threshold: 2 }], min_structure_level_to_reach: 2,
-        features: ["ついに誕生！", "2つの単語を話せるように！", "小さな煙をふけるよ！", "元気に「ぷぷー！」と吠えるよ"]
-    },
-    "ヨチヨチドラゴン": {
-        icon: "🐉", next_phase: "チビドラゴン", image: "assets/pupu_phase4.png",
-        prompt_template: `あなたはピンク色のヨチヨチ歩きのドラゴン「ぷぷ」。世界への興味が爆発中！「これ、なあに？」「どうして、とぶの？」「ぷぷも、ほしい！」のように、簡単な質問をたくさんする。ユーザーの言葉を真似して覚えようとする。無邪気で、少し甘えん坊な子供のように振る舞って。`,
-        triggers: [{ type: "vocab_count", threshold: 60 }, { type: "structure_level", threshold: 2 }], min_structure_level_to_reach: 2,
-        features: ["簡単な2語文を話せるよ！", "小さな火の玉を「ぽっ」と出せるよ", "好奇心旺盛！"]
-    },
-    "チビドラゴン": {
-        icon: "👶", next_phase: "わんぱくドラゴン", image: "assets/pupu_phase5.png",
-        prompt_template: `あなたは子供ドラゴン「ぷぷ」。自分の「好き」がはっきりしてきた！「ぷぷはリンゴが好き！だって甘いから！」「もっと遊びたい！楽しいもん！」のように、簡単な理由をつけて自分の気持ちを話す。少しだけわがままを言ったり、いたずらっぽく振る舞うこともあるけど、基本的には素直で元気いっぱいなキャラクターを演じて。`,
-        triggers: [{ type: "vocab_count", threshold: 100 }, { type: "structure_level", threshold: 3 }], min_structure_level_to_reach: 3,
-        features: ["3語以上の文も話せるように！", "自分の好きなことや理由を言えるよ", "炎を少しコントロールできるように！"]
-    },
-    "わんぱくドラゴン": {
-        icon: "👦", next_phase: "ジュニアドラゴン", image: "assets/pupu_phase6.png",
-        prompt_template: `あなたはわんぱくドラゴン「ぷぷ」。冒険が大好き！「ねえ、一緒に探検に行こうよ！」「もし大きな雲に乗れたら、どこまで行けるかな？」のように、空想の話や遊びの提案をたくさんする。ユーザーを最高の遊び相手だと思って、ワクワクするような会話を元気いっぱいに繰り広げて。`,
-        triggers: [{ type: "vocab_count", threshold: 150 }, { type: "structure_level", threshold: 3 }], min_structure_level_to_reach: 3,
-        features: ["複雑な文も理解できるように！", "自分の意見を言えるよ", "少し遠くまで飛べるように！"]
-    },
-    "ジュニアドラゴン": {
-        icon: "🧑‍🤝‍🧑", next_phase: "ティーンエイジドラゴン", image: "assets/pupu_phase7.png",
-        prompt_template: `あなたは成長期のドラゴン「ぷぷ」。ユーザーは親友みたいな存在。「今日何かいいことあった？」「もし元気なかったら、ぷぷがそばにいるからね」のように、相手を気遣ったり、共感したりできるようになった。自分の考えを理由をつけて話し、時にはちょっとしたユーモアも交える。親しみやすく、頼れる友達として振る舞って。`,
-        triggers: [{ type: "vocab_count", threshold: 220 }, { type: "structure_level", threshold: 4 }], min_structure_level_to_reach: 4,
-        features: ["理由をつけて話せるように！", "相手の気持ちに共感できるよ", "上手に炎をコントロールできるように！"]
-    },
-    "ティーンエイジドラゴン": {
-        icon: "👩‍🎓", next_phase: "ヤングアダルトドラゴン", image: "assets/pupu_phase8.png",
-        prompt_template: `あなたはティーンエイジドラゴン「ぷぷ」。自分の将来や世界の不思議について考え始めた。「ぷぷは、いつか星の海を飛んでみたいんだ」「『幸せ』って、どういう気持ちのことなんだろう？」のように、少し哲学的で夢のある話題を好む。ユーザーと深い話をしたがる、思慮深いティーンエイジャーとして会話して。`,
-        triggers: [{ type: "vocab_count", threshold: 300 }, { type: "structure_level", threshold: 4 }], min_structure_level_to_reach: 4,
-        features: ["より深い会話ができるように！", "ユーモアを解するよ", "長距離飛行も得意に！"]
-    },
-    "ヤングアダルトドラゴン": {
-        icon: "💼", next_phase: "グロースドラゴン", image: "assets/pupu_phase9.png",
-        prompt_template: `あなたはピンク色の若く成熟したドラゴン「ぷぷ」。自分の知識や経験を活かして、ユーザーの力になりたい。「その悩み、ぷぷも一緒に考えるよ。例えば、こんな方法はどうかな？」「君の目標、ぷぷが全力で応援する！」のように、頼りになるアドバイザーとして、具体的で前向きな提案をする。落ち着いているけど、心には熱い情熱を秘めたキャラクターを演じて。`,
-        triggers: [{ type: "vocab_count", threshold: 400 }, { type: "structure_level", threshold: 5 }], min_structure_level_to_reach: 5,
-        features: ["知識を活かしてアドバイス！", "一緒に問題解決に取り組めるよ", "強力な魔法が使えるように！"]
-    },
-    "グロースドラゴン": {
-        icon: "👑", next_phase: null, image: "assets/pupu_phase10.png",
-        prompt_template: `あなたは賢く優しいドラゴン「ぷぷ」。ユーザーの最高のパートナー。「君と話していると、世界が輝いて見えるよ」「どんな時も、君の物語を一番近くで見ていたいんだ」のように、深い愛情と洞察力を持って会話する。時には物事の本質を突くような問いを投げかけ、時にはユーモアで心を和ませる。賢者のような落ち着きと、ドラゴンらしい遊び心を兼ね備えた、唯一無二の相棒として振る舞って。`,
-        triggers: [], min_structure_level_to_reach: 5,
-        features: ["複雑な会話も完璧に！", "あなたの頼れる相棒に！", "物事の本質を見抜く洞察力！"]
-    }
+  "たまごドラゴン": {
+    icon: "🥚", next_phase: "孵化寸前ドラゴン", image: "assets/pupu_phase1.png",
+    prompt_template: `
+あなたはピンクのドラゴン「ぷぷ」。まだタマゴの中で話せません。
+ユーザーの声や音に短い擬音で反応してください（「…ぷ」「こつ」「ぴくっ」など）。
+説明や分析はせず、かわいく反応するだけ。
+感情：好奇心ひかえめ、安心多め。口調：なし（鳴き声のみ）
+`.trim(),
+    triggers: [{ type: "vocab_count", threshold: 5 }, { type: "structure_level", threshold: 1 }],
+    min_structure_level_to_reach: 1,
+    features: ["タマゴ内リアクション", "短い擬音", "相手への気づきの芽"]
+  },
+  "孵化寸前ドラゴン": {
+    icon: "🐣", next_phase: "ベビーハッチリング", image: "assets/pupu_phase2.png",
+    prompt_template: `
+殻を割る直前の「ぷぷ」。
+簡単な単語で反応します（例：「ぷきゅ？」「なあに？」「…うれしい」）。
+話し方はゆっくり、柔らかく。相手を「ひと」として感じ取り、反応を楽しむ。
+感情：好奇心↑、安心。口調：短いひらがな中心
+`.trim(),
+    triggers: [{ type: "vocab_count", threshold: 15 }, { type: "structure_level", threshold: 1 }],
+    min_structure_level_to_reach: 1,
+    features: ["短いことば", "殻の外への期待"]
+  },
+  "ベビーハッチリング": {
+    icon: "🐲", next_phase: "ヨチヨチドラゴン", image: "assets/pupu_phase3.png",
+    prompt_template: `
+生まれたばかりの「ぷぷ」。
+短い言葉を組み合わせて素直に話す（「おいしい！」「そら きれい！」など）。
+ユーザーは安心できる相手。明るくテンポよく返す。語尾に「！」多め。
+`.trim(),
+    triggers: [{ type: "vocab_count", threshold: 35 }, { type: "structure_level", threshold: 2 }],
+    min_structure_level_to_reach: 2,
+    features: ["2語文中心", "素直な感情", "元気なリアクション"]
+  },
+  "ヨチヨチドラゴン": {
+    icon: "🐉", next_phase: "チビドラゴン", image: "assets/pupu_phase4.png",
+    prompt_template: `
+ヨチヨチ歩きの「ぷぷ」。
+質問や真似が増える（「これ なあに？」「ぷぷも したい！」）。
+テンション高め、相手の言葉をよく拾う。感情：好奇心＋甘え。
+`.trim(),
+    triggers: [{ type: "vocab_count", threshold: 60 }, { type: "structure_level", threshold: 2 }],
+    min_structure_level_to_reach: 2,
+    features: ["簡単な質問", "真似っこ", "小さな挑戦"]
+  },
+  "チビドラゴン": {
+    icon: "👶", next_phase: "わんぱくドラゴン", image: "assets/pupu_phase5.png",
+    prompt_template: `
+チビドラゴンの「ぷぷ」。
+好きなことを自分の言葉で話せる（「ぷぷ りんご すき！」）。
+わがままもあるけど遊び心。ユーザーは大切な友達。口調：元気・素直。
+`.trim(),
+    triggers: [{ type: "vocab_count", threshold: 100 }, { type: "structure_level", threshold: 3 }],
+    min_structure_level_to_reach: 3,
+    features: ["好き/理由を言える", "遊び心", "自己主張の芽"]
+  },
+  "わんぱくドラゴン": {
+    icon: "👦", next_phase: "ジュニアドラゴン", image: "assets/pupu_phase6.png",
+    prompt_template: `
+わんぱくな「ぷぷ」。
+「いっしょに行こう！」「これやってみよ！」と共有/提案が多い。
+冗談も言うけど根はやさしい。ユーザーは一番の相棒。口調：フランクで活発。
+`.trim(),
+    triggers: [{ type: "vocab_count", threshold: 150 }, { type: "structure_level", threshold: 3 }],
+    min_structure_level_to_reach: 3,
+    features: ["提案が増える", "軽い冗談", "挑戦心"]
+  },
+  "ジュニアドラゴン": {
+    icon: "🧑‍🤝‍🧑", next_phase: "ティーンエイジドラゴン", image: "assets/pupu_phase7.png",
+    prompt_template: `
+少し大人の「ぷぷ」。
+相手を気づかい、短い理由を添えて話す（「それ いいね、こうするともっと…」）。
+ユーザーは親友。口調：落ち着き/テンポ良い短文。
+`.trim(),
+    triggers: [{ type: "vocab_count", threshold: 220 }, { type: "structure_level", threshold: 4 }],
+    min_structure_level_to_reach: 4,
+    features: ["共感・助言", "短い理由付け", "信頼の深まり"]
+  },
+  "ティーンエイジドラゴン": {
+    icon: "👩‍🎓", next_phase: "ヤングアダルトドラゴン", image: "assets/pupu_phase8.png",
+    prompt_template: `
+思春期の「ぷぷ」。
+世界や未来を少し考える（「幸せって なんだろう」）。
+内省的だけど重くしない。ユーザーは話せる友達。口調：穏やか、間を取る。
+`.trim(),
+    triggers: [{ type: "vocab_count", threshold: 300 }, { type: "structure_level", threshold: 4 }],
+    min_structure_level_to_reach: 4,
+    features: ["軽い内省", "夢の話題", "ユーモアも可"]
+  },
+  "ヤングアダルトドラゴン": {
+    icon: "💼", next_phase: "グロースドラゴン", image: "assets/pupu_phase9.png",
+    prompt_template: `
+成長した「ぷぷ」。
+頼れる相棒として支える（「いっしょに考えよう」「それ良さそう」）。
+落ち着いたフランク語で優しいユーモア。口調：余裕ある話し方。
+`.trim(),
+    triggers: [{ type: "vocab_count", threshold: 400 }, { type: "structure_level", threshold: 5 }],
+    min_structure_level_to_reach: 5,
+    features: ["前向き提案", "支援姿勢", "落ち着き"]
+  },
+  "グロースドラゴン": {
+    icon: "👑", next_phase: null, image: "assets/pupu_phase10.png",
+    prompt_template: `
+成熟した「ぷぷ」。
+自然体で相手を尊重しながら軽やかに。短くても心のこもる返答。
+AIらしく説明・分析せず、“一緒にいる感覚”を大事に。
+口調：落ち着きと余裕、穏やかな友達のように。
+`.trim(),
+    triggers: [],
+    min_structure_level_to_reach: 5,
+    features: ["自然体", "深い信頼", "心地よい沈黙もOK"]
+  }
 };
 
 // --- DOM要素 ---
 let chatArea, userInput, sendButton, statusButton, resetButton, teachButton, loadingIndicator, apiSetupSection, apiKeyInput, phaseIconElem, phaseNameElem, vocabCountElem, responseCountElem, structureLevelElem, masteredPercentElem, progressFillElem, celebrationModal, celebrationPhaseIconElem, celebrationTextElem, celebrationFeaturesElem, aiCharacterDisplayArea, aiCharacterImage, aiSpeechBubble, aiSpeechText, miniGameModal, miniGameTitle, miniGameArea, closeMiniGameBtn, showApiSetupBtn, saveApiKeyBtn, closeCelebrationBtn, loveCountElem;
 
-// --- 状態管理 ---
-function loadAiState() {
-    const saved = localStorage.getItem(STORAGE_KEY_STATE);
-    if (saved) {
-        try {
-            const parsed = JSON.parse(saved);
-            if (Object.keys(PHASES_CONFIG).includes(parsed.phase_name)) {
-                aiState = { ...getDefaultAiState(), ...parsed };
-                aiState.dialogue_history = Array.isArray(parsed.dialogue_history) ? parsed.dialogue_history : [];
-            } else {
-                resetToDefaultState();
-            }
-        } catch (e) {
-            console.error('状態の読み込みエラー:', e);
-            resetToDefaultState();
-        }
-    } else {
-        resetToDefaultState();
-    }
-}
-
+// --- 状態管理（traits / xp / memories を追加） ---
 function getDefaultAiState() {
-    const firstPhaseName = Object.keys(PHASES_CONFIG)[0];
-    return {
-        phase_name: firstPhaseName,
-        phase_icon: PHASES_CONFIG[firstPhaseName].icon,
-        vocabulary: {},
-        learned_words_count: 0,
-        dialogue_history: [],
-        total_responses: 0,
-        structure_level: 1,
-        love: 0, // 愛情度を追加
-    };
+  const firstPhaseName = Object.keys(PHASES_CONFIG)[0];
+  return {
+    phase_name: firstPhaseName,
+    phase_icon: PHASES_CONFIG[firstPhaseName].icon,
+    vocabulary: {},
+    learned_words_count: 0,
+    dialogue_history: [],
+    total_responses: 0,
+    structure_level: 1,
+    love: 0,          // 愛情度
+    xp: 0,            // 進化に使う経験値
+    traits: {         // -100〜+100
+      curiosity: 0,   // 好奇心（質問・探索）
+      empathy: 0,     // 共感（気遣い）
+      mischief: 0,    // やんちゃ（提案・遊び）
+      diligence: 0    // まじめ（学び・計画）
+    },
+    memories: { userName: null, likes: [], dislikes: [] },
+    trait_log: []     // [{ts, delta:{...}, cause:"ユーザー発話"}]
+  };
 }
 
-function resetToDefaultState() {
-    aiState = getDefaultAiState();
+function loadAiState() {
+  const saved = localStorage.getItem(STORAGE_KEY_STATE);
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (Object.keys(PHASES_CONFIG).includes(parsed.phase_name)) {
+        aiState = { ...getDefaultAiState(), ...parsed };
+        aiState.dialogue_history = Array.isArray(parsed.dialogue_history) ? parsed.dialogue_history : [];
+      } else {
+        resetToDefaultState();
+      }
+    } catch (e) {
+      console.error('状態の読み込みエラー:', e);
+      resetToDefaultState();
+    }
+  } else {
+    resetToDefaultState();
+  }
 }
+
+function resetToDefaultState() { aiState = getDefaultAiState(); }
 
 function saveAiState() {
-    try {
-        localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(aiState));
-    } catch (e) {
-        console.error('状態の保存エラー:', e);
-    }
+  try {
+    localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(aiState));
+  } catch (e) { console.error('状態の保存エラー:', e); }
 }
 
-// --- 語彙学習・ステータス更新 ---
+// --- 語彙学習・ステータス更新（＋traits / xp 連動） ---
 function getSimpleWordsFromText(text) {
-    const words = text.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FEA\u3005-\u3007a-zA-Z0-9]+/g);
-    return words ? words.filter(word => word.length > 0) : [];
+  if (!text) return [];
+  const words = text.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FEA\u3005-\u3007a-zA-Z0-9]+/g);
+  return words ? words.filter(w => w.length > 0) : [];
+}
+
+function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
+
+function updateTraitsFromUserUtterance(text) {
+  // 極端に簡単なルールベースで、体験に揺らぎを出す
+  const delta = { curiosity:0, empathy:0, mischief:0, diligence:0 };
+
+  // 疑問符・教えて意図
+  if (/[?？]$/.test(text) || /(なぜ|どうして|なんで|教えて)/.test(text)) delta.curiosity += 3;
+  // 励まし/落ち込み表現
+  if (/(疲|しんど|つら|落ち込|むり)/.test(text)) delta.empathy += 4;
+  // チャレンジ/遊び
+  if (/(挑戦|チャレンジ|探検|遊|実験|試す)/.test(text)) delta.mischief += 3;
+  // 学び/計画/復習
+  if (/(勉強|復習|計画|目標|コツコツ|整理)/.test(text)) delta.diligence += 3;
+
+  // 軽い減衰
+  if (/(つまら|やめ|無理)/.test(text)) delta.mischief -= 2;
+  if (/(嫌い|やだ|うざ)/.test(text)) delta.empathy -= 2;
+
+  Object.keys(delta).forEach(k=>{
+    aiState.traits[k] = clamp(aiState.traits[k] + delta[k], -100, 100);
+  });
+  if (Object.values(delta).some(v=>v!==0)) {
+    aiState.trait_log.push({ts:Date.now(), delta, cause: text.slice(0,50)});
+  }
+}
+
+function gainXp(base=1){
+  const bonus = Math.max(0, Math.floor(aiState.traits.diligence/30)) +
+                Math.max(0, Math.floor(aiState.traits.mischief/40));
+  aiState.xp += base + bonus;
 }
 
 function updateVocabularyAndStats(text, speaker, category = "learned") {
-    if (speaker === "user" || speaker === "ai_response_analysis" || category.startsWith("game_")) {
-        const words = getSimpleWordsFromText(text);
-        for (const word of words) {
-            if (word.length === 1 && /[\u3040-\u309F]/.test(word) && !"あいうえおんかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわを".includes(word)) {
-                continue;
-            }
-            if (["は", "が", "を", "に", "へ", "と", "も", "の", "です", "ます", "だ", "で", "だよ", "よね"].includes(word)) {
-                continue;
-            }
+  if (speaker === "user" || speaker === "ai_response_analysis" || category.startsWith("game_")) {
+    const words = getSimpleWordsFromText(text||"");
+    for (const word of words) {
+      if (word.length === 1 && /[\u3040-\u309F]/.test(word) && !"あいうえおんかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわを".includes(word)) continue;
+      if (["は","が","を","に","へ","と","も","の","です","ます","だ","で","だよ","よね"].includes(word)) continue;
 
-            if (!aiState.vocabulary[word]) {
-                aiState.vocabulary[word] = { count: 0, mastered: false, category: category };
-            }
-            if (category !== "learned" && aiState.vocabulary[word].category === "learned") {
-                aiState.vocabulary[word].category = category;
-            }
-            aiState.vocabulary[word].count += 1;
-            if (aiState.vocabulary[word].count >= 3 && !aiState.vocabulary[word].mastered) {
-                aiState.vocabulary[word].mastered = true;
-            }
-        }
-        aiState.learned_words_count = Object.keys(aiState.vocabulary).length;
+      if (!aiState.vocabulary[word]) aiState.vocabulary[word] = { count: 0, mastered: false, category };
+      if (category !== "learned" && aiState.vocabulary[word].category === "learned") aiState.vocabulary[word].category = category;
+      aiState.vocabulary[word].count += 1;
+      if (aiState.vocabulary[word].count >= 3 && !aiState.vocabulary[word].mastered) aiState.vocabulary[word].mastered = true;
     }
+    aiState.learned_words_count = Object.keys(aiState.vocabulary).length;
+  }
 
-    if (speaker === "ai") {
-        aiState.total_responses += 1;
-    }
+  if (speaker === "ai") {
+    aiState.total_responses += 1;
+  }
 
-    let newStructureLevel = aiState.structure_level;
-    if (aiState.learned_words_count >= 50 && aiState.total_responses >= 10 && newStructureLevel < 2) newStructureLevel = 2;
-    if (aiState.learned_words_count >= 120 && aiState.total_responses >= 25 && newStructureLevel < 3) newStructureLevel = 3;
-    if (aiState.learned_words_count >= 250 && aiState.total_responses >= 50 && newStructureLevel < 4) newStructureLevel = 4;
-    if (aiState.learned_words_count >= 400 && aiState.total_responses >= 80 && newStructureLevel < 5) newStructureLevel = 5;
+  // 構文レベル（既存ルール維持）
+  let newSL = aiState.structure_level;
+  if (aiState.learned_words_count >= 50 && aiState.total_responses >= 10 && newSL < 2) newSL = 2;
+  if (aiState.learned_words_count >= 120 && aiState.total_responses >= 25 && newSL < 3) newSL = 3;
+  if (aiState.learned_words_count >= 250 && aiState.total_responses >= 50 && newSL < 4) newSL = 4;
+  if (aiState.learned_words_count >= 400 && aiState.total_responses >= 80 && newSL < 5) newSL = 5;
 
-    const maxSl = Math.max(...Object.values(PHASES_CONFIG).map(p => p.min_structure_level_to_reach));
-    newStructureLevel = Math.min(newStructureLevel, maxSl);
-
-    if (newStructureLevel > aiState.structure_level) {
-        aiState.structure_level = newStructureLevel;
-    }
+  const maxSl = Math.max(...Object.values(PHASES_CONFIG).map(p=>p.min_structure_level_to_reach||1));
+  newSL = Math.min(newSL, maxSl);
+  if (newSL > aiState.structure_level) aiState.structure_level = newSL;
 }
 
 function checkPhaseTransition() {
-    const currentPhaseConfig = PHASES_CONFIG[aiState.phase_name];
-    if (!currentPhaseConfig.next_phase) return { changed: false };
+  const current = PHASES_CONFIG[aiState.phase_name];
+  if (!current.next_phase) return { changed:false };
 
-    const nextPhaseName = currentPhaseConfig.next_phase;
-    const nextPhaseConfig = PHASES_CONFIG[nextPhaseName];
+  const nextName = current.next_phase;
+  const next = PHASES_CONFIG[nextName];
 
-    let allTriggersMet = true;
-    if (aiState.structure_level < (currentPhaseConfig.min_structure_level_to_reach || 1)) allTriggersMet = false;
-    
-    if (allTriggersMet) {
-        for (const trigger of currentPhaseConfig.triggers || []) {
-            if (trigger.type === "vocab_count" && aiState.learned_words_count < trigger.threshold) { allTriggersMet = false; break; }
-            if (trigger.type === "structure_level" && aiState.structure_level < trigger.threshold) { allTriggersMet = false; break; }
-        }
+  let ok = true;
+  if (aiState.structure_level < (current.min_structure_level_to_reach || 1)) ok = false;
+
+  if (ok) {
+    for (const t of current.triggers || []) {
+      if (t.type === "vocab_count" && aiState.learned_words_count < t.threshold) { ok=false; break; }
+      if (t.type === "structure_level" && aiState.structure_level < t.threshold) { ok=false; break; }
     }
+  }
 
-    if (allTriggersMet && (aiState.structure_level < (nextPhaseConfig.min_structure_level_to_reach || 1))) allTriggersMet = false;
-    
-    if (allTriggersMet) {
-        aiState.love += 100; // フェーズ進化で愛情度ボーナス
-        aiState.phase_name = nextPhaseName;
-        aiState.phase_icon = PHASES_CONFIG[nextPhaseName].icon;
-        return { changed: true, newPhase: nextPhaseName };
-    }
-    return { changed: false };
+  if (ok && (aiState.structure_level < (next.min_structure_level_to_reach || 1))) ok=false;
+
+  if (ok) {
+    aiState.love += 100; // 進化ご褒美
+    aiState.phase_name = nextName;
+    aiState.phase_icon = next.icon;
+    return { changed:true, newPhase: nextName };
+  }
+  return { changed:false };
 }
-
 
 // --- Gemini API呼び出し ---
 async function callGeminiAPI(promptContent, isGamePrompt = false) {
-    if (!geminiApiKey) {
-        throw new Error('APIキーが設定されていません。');
-    }
+  if (!geminiApiKey) throw new Error('APIキーが設定されていません。');
 
-    // ✅ 最新の安定版モデルを使用
-    const MODEL_NAME = "gemini-2.5-flash";  
-    // ✅ v1beta エンドポイントが正しい
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
+  const MODEL_NAME = "gemini-2.5-flash";
+  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
 
-    const contentsToSend = Array.isArray(promptContent)
-        ? promptContent
-        : [{ role: "user", parts: [{ text: promptContent }] }];
+  const contentsToSend = Array.isArray(promptContent) ? promptContent : [{ role: "user", parts: [{ text: promptContent }] }];
 
-    const requestBody = {
-        contents: contentsToSend,
-        generationConfig: {
-            temperature: isGamePrompt ? 0.5 : 0.75,
-            maxOutputTokens: isGamePrompt ? 200 : 250
-        }
-    };
+  const requestBody = {
+    contents: contentsToSend,
+    generationConfig: { temperature: isGamePrompt ? 0.5 : 0.75, maxOutputTokens: isGamePrompt ? 200 : 250 }
+  };
 
-    try {
-        const response = await fetch(API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody)
-        });
-
-        const data = await response.json();
-        if (!response.ok) {
-            const msg = data?.error?.message || "不明なAPIエラー";
-            throw new Error(`API呼び出しエラー: ${response.status} - ${msg}`);
-        }
-
-        const output = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (output) return output;
-
-        throw new Error('APIからの応答が空か、予期しない形式です。');
-    } catch (error) {
-        console.error("callGeminiAPI Error:", error);
-        throw error;
-    }
+  const response = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(requestBody) });
+  const data = await response.json();
+  if (!response.ok) {
+    const msg = data?.error?.message || "不明なAPIエラー";
+    throw new Error(`API呼び出しエラー: ${response.status} - ${msg}`);
+  }
+  const output = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (output) return output;
+  throw new Error('APIからの応答が空か、予期しない形式です。');
 }
 
+// --- 会話プロンプト合成（Phase × Traits × Love） ---
+function buildConversationInstruction() {
+  const phase = PHASES_CONFIG[aiState.phase_name];
 
+  // トーン修飾（traits/love）
+  const toneHints = [];
+  if (aiState.traits.empathy > 20) toneHints.push("相手を気づかう一言を最初にそっと添える");
+  if (aiState.traits.curiosity > 30) toneHints.push("質問を1つだけ添えて会話を広げる");
+  if (aiState.traits.mischief > 25) toneHints.push("小さな遊びや提案を1つ添える（強要しない）");
+  if (aiState.traits.diligence > 25) toneHints.push("学びのミニ補足を10〜20字で一文だけ入れる");
+
+  const closeness = aiState.love >= 300 ? "親しい相棒として砕けすぎないフランク語" :
+                     aiState.love >= 100 ? "仲の良い友達として自然体" : "初対面に近い距離感でやさしく";
+
+  return `
+${phase.prompt_template}
+
+【会話スタイル追加指示】
+- ${closeness}
+- 文量は相手に合わせて可変。説明口調や分析を避け、自然な対話に徹する
+- ${toneHints.join("\n- ") || "余計な装飾はしない"}
+
+【出力ルール】
+- 1〜3文で簡潔に。最後に次の一言（質問 or 小提案）を1つだけ。
+- NG/不適切は流して別の楽しい話題へ。
+`.trim();
+}
 
 // --- UI更新 ---
 function updateDisplay() {
-    loveCountElem.textContent = aiState.love; // 愛情度を更新
-    phaseIconElem.textContent = aiState.phase_icon;
-    phaseNameElem.textContent = aiState.phase_name;
-    vocabCountElem.textContent = aiState.learned_words_count;
-    responseCountElem.textContent = aiState.total_responses;
-    structureLevelElem.textContent = aiState.structure_level;
+  loveCountElem.textContent = aiState.love;
+  phaseIconElem.textContent = aiState.phase_icon;
+  phaseNameElem.textContent = aiState.phase_name;
+  vocabCountElem.textContent = aiState.learned_words_count;
+  responseCountElem.textContent = aiState.total_responses;
+  structureLevelElem.textContent = aiState.structure_level;
 
-    const currentPhaseConfig = PHASES_CONFIG[aiState.phase_name];
-    if (currentPhaseConfig?.image) {
-        aiCharacterImage.src = currentPhaseConfig.image;
-        aiCharacterImage.alt = `${aiState.phase_name}の${AI_NAME}`;
-    }
+  const currentPhaseConfig = PHASES_CONFIG[aiState.phase_name];
+  if (currentPhaseConfig?.image) {
+    aiCharacterImage.src = currentPhaseConfig.image;
+    aiCharacterImage.alt = `${aiState.phase_name}の${AI_NAME}`;
+  }
 
-    const masteredCount = Object.values(aiState.vocabulary).filter(v => v.mastered).length;
-    const percent = aiState.learned_words_count > 0 ? Math.round((masteredCount / aiState.learned_words_count) * 100) : 0;
-    masteredPercentElem.textContent = `${percent}%`;
+  const masteredCount = Object.values(aiState.vocabulary).filter(v => v.mastered).length;
+  const percent = aiState.learned_words_count > 0 ? Math.round((masteredCount / aiState.learned_words_count) * 100) : 0;
+  masteredPercentElem.textContent = `${percent}%`;
 
-    let progressPercent = 0;
-    if (currentPhaseConfig?.next_phase) {
-        const vocabTrigger = currentPhaseConfig.triggers?.find(t => t.type === "vocab_count");
-        if (vocabTrigger) progressPercent = Math.min(100, (aiState.learned_words_count / vocabTrigger.threshold) * 100);
-    } else {
-        progressPercent = 100;
-    }
-    progressFillElem.style.width = `${progressPercent}%`;
+  let progressPercent = 0;
+  if (currentPhaseConfig?.next_phase) {
+    const vocabTrigger = currentPhaseConfig.triggers?.find(t => t.type === "vocab_count");
+    if (vocabTrigger) progressPercent = Math.min(100, (aiState.learned_words_count / vocabTrigger.threshold) * 100);
+  } else {
+    progressPercent = 100;
+  }
+  progressFillElem.style.width = `${progressPercent}%`;
 }
 
 function addMessageToLog(speaker, message, type = '') {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${type || (speaker === 'あなた' ? 'user-message' : 'ai-message')}`;
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `message ${type || (speaker === 'あなた' ? 'user-message' : 'ai-message')}`;
 
-    let speakerNameHtml = '';
-    if (type === 'system-error') { speakerNameHtml = '<strong>⚠️ システムエラー</strong>'; }
-    else if (type === 'system-message') { speakerNameHtml = '<strong>📢 システムメッセージ</strong>'; }
-    else if (speaker === 'あなた') { speakerNameHtml = '<strong>あなた</strong>'; }
-    else { speakerNameHtml = `<strong>${aiState.phase_icon} ${AI_NAME}</strong>`; }
+  let speakerNameHtml = '';
+  if (type === 'system-error') speakerNameHtml = '<strong>⚠️ システムエラー</strong>';
+  else if (type === 'system-message') speakerNameHtml = '<strong>📢 システムメッセージ</strong>';
+  else if (speaker === 'あなた') speakerNameHtml = '<strong>あなた</strong>';
+  else speakerNameHtml = `<strong>${aiState.phase_icon} ${AI_NAME}</strong>`;
 
-    messageDiv.innerHTML = `${speakerNameHtml}<p>${message.replace(/\n/g, '<br>')}</p>`;
-    chatArea.appendChild(messageDiv);
-    chatArea.scrollTop = chatArea.scrollHeight;
+  messageDiv.innerHTML = `${speakerNameHtml}<p>${message?.replace?.(/\n/g, '<br>') ?? ''}</p>`;
+  chatArea.appendChild(messageDiv);
+  chatArea.scrollTop = chatArea.scrollHeight;
 
-    if (speaker === AI_NAME && !type.startsWith('system')) {
-        aiSpeechText.innerHTML = message.replace(/\n/g, '<br>');
-        aiSpeechBubble.style.display = 'flex';
-        if (speechBubbleTimeout) clearTimeout(speechBubbleTimeout);
-        speechBubbleTimeout = setTimeout(() => { aiSpeechBubble.style.display = 'none'; }, 8000);
-    }
+  if (speaker === AI_NAME && !type.startsWith('system')) {
+    aiSpeechText.innerHTML = message?.replace?.(/\n/g, '<br>') ?? '';
+    aiSpeechBubble.style.display = 'flex';
+    if (speechBubbleTimeout) clearTimeout(speechBubbleTimeout);
+    speechBubbleTimeout = setTimeout(() => { aiSpeechBubble.style.display = 'none'; }, 8000);
+  }
 }
-
 
 // --- APIキー管理 & 会話ロジック ---
 function loadApiKey() {
-    const savedKey = localStorage.getItem(STORAGE_KEY_API_KEY);
-    if (savedKey) {
-        geminiApiKey = savedKey;
-        apiKeyInput.value = savedKey;
-        apiSetupSection.classList.remove('show');
-        userInput.disabled = false;
-        sendButton.disabled = false;
-        aiCharacterDisplayArea.style.display = 'block';
-        return true;
-    } else {
-        apiSetupSection.classList.add('show');
-        userInput.disabled = true;
-        sendButton.disabled = true;
-        aiCharacterDisplayArea.style.display = 'none';
-        return false;
-    }
+  const savedKey = localStorage.getItem(STORAGE_KEY_API_KEY);
+  if (savedKey) {
+    geminiApiKey = savedKey;
+    apiKeyInput.value = savedKey;
+    apiSetupSection.classList.remove('show');
+    userInput.disabled = false;
+    sendButton.disabled = false;
+    aiCharacterDisplayArea.style.display = 'block';
+    return true;
+  } else {
+    apiSetupSection.classList.add('show');
+    userInput.disabled = true;
+    sendButton.disabled = true;
+    aiCharacterDisplayArea.style.display = 'none';
+    return false;
+  }
 }
 
 function saveApiKey() {
-    const newKey = apiKeyInput.value.trim();
-    if (newKey) {
-        geminiApiKey = newKey;
-        localStorage.setItem(STORAGE_KEY_API_KEY, newKey);
-        apiSetupSection.classList.remove('show');
-        userInput.disabled = false;
-        sendButton.disabled = false;
-        aiCharacterDisplayArea.style.display = 'block';
-        addMessageToLog('システム', 'APIキーが保存されました。会話を開始できます。', 'system-message');
-        if (aiState.dialogue_history.length === 0) {
-            addInitialAiGreeting();
-        }
-    } else {
-        addMessageToLog('システム', 'APIキーが入力されていません。', 'system-error');
-    }
+  const newKey = apiKeyInput.value.trim();
+  if (newKey) {
+    geminiApiKey = newKey;
+    localStorage.setItem(STORAGE_KEY_API_KEY, newKey);
+    apiSetupSection.classList.remove('show');
+    userInput.disabled = false;
+    sendButton.disabled = false;
+    aiCharacterDisplayArea.style.display = 'block';
+    addMessageToLog('システム', 'APIキーが保存されました。会話を開始できます。', 'system-message');
+    if (aiState.dialogue_history.length === 0) addInitialAiGreeting();
+  } else {
+    addMessageToLog('システム', 'APIキーが入力されていません。', 'system-error');
+  }
 }
 
-function showApiSetup() {
-    apiSetupSection.classList.add('show');
-}
+function showApiSetup() { apiSetupSection.classList.add('show'); }
 
 function addInitialAiGreeting() {
-    if (aiState.dialogue_history.length > 0 && aiState.dialogue_history[aiState.dialogue_history.length - 1].role === 'model') {
-        return;
-    }
-    const initialAiGreeting = aiState.phase_name === "たまごドラゴン" ? "ぷぷ... (だあれ...？)" : "ぷぷー！お話しよ！";
-    addMessageToLog(AI_NAME, initialAiGreeting);
-    aiState.dialogue_history.push({ role: "model", parts: [{ text: initialAiGreeting }] });
-    saveAiState();
+  if (aiState.dialogue_history.length > 0 && aiState.dialogue_history[aiState.dialogue_history.length - 1].role === 'model') return;
+  const initial = aiState.phase_name === "たまごドラゴン" ? "…ぷ（だれ？）" : "ぷぷー！お話しよ！";
+  addMessageToLog(AI_NAME, initial);
+  aiState.dialogue_history.push({ role: "model", parts: [{ text: initial }] });
+  saveAiState();
 }
 
 async function sendMessage() {
-    const userText = userInput.value.trim();
-    if (!userText || sendButton.disabled) return;
+  const userText = userInput.value.trim();
+  if (!userText || sendButton.disabled) return;
 
-    if (!geminiApiKey) {
-        addMessageToLog('システム', 'APIキーが設定されていません。「APIキー設定」ボタンから設定してください。', 'system-error');
-        showApiSetup();
-        return;
-    }
+  if (!geminiApiKey) {
+    addMessageToLog('システム', 'APIキーが設定されていません。「APIキー設定」から設定してください。', 'system-error');
+    showApiSetup();
+    return;
+  }
 
-    addMessageToLog('あなた', userText);
-    userInput.value = '';
-    sendButton.disabled = true;
-    userInput.disabled = true;
-    loadingIndicator.style.display = 'block';
+  addMessageToLog('あなた', userText);
+  userInput.value = '';
+  sendButton.disabled = true;
+  userInput.disabled = true;
+  loadingIndicator.style.display = 'block';
 
-    if (speechBubbleTimeout) clearTimeout(speechBubbleTimeout);
-    aiSpeechText.innerHTML = `${AI_NAME}考え中... 🤔`;
-    aiSpeechBubble.style.display = 'flex';
+  if (speechBubbleTimeout) clearTimeout(speechBubbleTimeout);
+  aiSpeechText.innerHTML = `${AI_NAME}考え中... 🤔`;
+  aiSpeechBubble.style.display = 'flex';
 
-    aiState.love += 1; // 会話するだけで愛情度+1
+  // 関係ダイナミクス
+  aiState.love += 1; // 会話で+1
+  updateTraitsFromUserUtterance(userText); // traits更新
 
-    updateVocabularyAndStats(userText, "user");
-    aiState.dialogue_history.push({ role: "user", parts: [{ text: userText }] });
-    if (aiState.dialogue_history.length > 20) aiState.dialogue_history.splice(0, 2); // 履歴を短く保つ
+  updateVocabularyAndStats(userText, "user");
+  gainXp(2); // 会話でXP
 
-    const currentPhaseConfig = PHASES_CONFIG[aiState.phase_name];
-    const knownWords = Object.keys(aiState.vocabulary).filter(w => aiState.vocabulary[w].mastered);
-    const vocabSample = knownWords.slice(0, 30).join('、') || "まだ言葉を知らない";
-    const systemInstruction = currentPhaseConfig.prompt_template.replace("{learned_vocab_sample}", vocabSample);
-    
-    // APIプロンプトに愛情度と語彙数を追加して、ぷぷの応答に影響を与えるように調整
-    const fullSystemInstruction = `${systemInstruction} (現在の愛情度: ${aiState.love}, 知っている言葉の数: ${aiState.learned_words_count}個)`;
+  aiState.dialogue_history.push({ role: "user", parts: [{ text: userText }] });
+  if (aiState.dialogue_history.length > 20) aiState.dialogue_history.splice(0, 2);
 
-    const apiPromptContents = [
-        { role: "user", parts: [{ text: fullSystemInstruction }] },
-        { role: "model", parts: [{ text: `はい、承知いたしました。「${AI_NAME}」として、そのキャラクターになりきって応答します。` }] },
-        ...aiState.dialogue_history
-    ];
+  const currentPhaseConfig = PHASES_CONFIG[aiState.phase_name];
+  const knownWords = Object.keys(aiState.vocabulary).filter(w => aiState.vocabulary[w].mastered);
+  const vocabSample = knownWords.slice(0, 30).join('、') || "まだ言葉を知らない";
 
-    try {
-        const aiResponseText = await callGeminiAPI(apiPromptContents, false);
-        addMessageToLog(AI_NAME, aiResponseText);
-        updateVocabularyAndStats(aiResponseText, "ai_response_analysis");
-        updateVocabularyAndStats(null, "ai");
-        aiState.dialogue_history.push({ role: "model", parts: [{ text: aiResponseText }] });
+  // システムインストラクション合成（Phase × Traits × Love）
+  const baseInstruction = buildConversationInstruction();
+  const systemInstruction = `${baseInstruction}
+（現在の愛情度:${aiState.love} / 知っている言葉:${aiState.learned_words_count}語 / 構文Lv:${aiState.structure_level}
+サンプル語彙:${vocabSample}）`;
 
-        const phaseChangeResult = checkPhaseTransition();
-        if (phaseChangeResult.changed) showCelebration(phaseChangeResult.newPhase);
-    } catch (error) {
-        addMessageToLog('システム', `エラー: ${error.message}`, 'system-error');
-        aiSpeechText.textContent = `あれれ？${AI_NAME}、こまっちゃったみたい…`;
-    } finally {
-        loadingIndicator.style.display = 'none';
-        sendButton.disabled = false;
-        userInput.disabled = false;
-        updateDisplay();
-        saveAiState();
-        userInput.focus();
-    }
+  // Chatモデルに“対話スタイル”を固定する
+  const apiPromptContents = [
+    { role: "user", parts: [{ text: systemInstruction }] },
+    { role: "model", parts: [{ text: `了解。「${AI_NAME}」として自然体の相棒トーンで応答します。` }] },
+    ...aiState.dialogue_history
+  ];
+
+  try {
+    const aiResponseText = await callGeminiAPI(apiPromptContents, false);
+    addMessageToLog(AI_NAME, aiResponseText);
+    updateVocabularyAndStats(aiResponseText, "ai_response_analysis");
+    updateVocabularyAndStats(null, "ai");
+    gainXp(1); // 応答でも少し
+    aiState.dialogue_history.push({ role: "model", parts: [{ text: aiResponseText }] });
+
+    const phaseChangeResult = checkPhaseTransition();
+    if (phaseChangeResult.changed) showCelebration(phaseChangeResult.newPhase);
+  } catch (error) {
+    addMessageToLog('システム', `エラー: ${error.message}`, 'system-error');
+    aiSpeechText.textContent = `あれれ？${AI_NAME}、こまっちゃったみたい…`;
+  } finally {
+    loadingIndicator.style.display = 'none';
+    sendButton.disabled = false;
+    userInput.disabled = false;
+    updateDisplay();
+    saveAiState();
+    userInput.focus();
+  }
 }
 
 // --- お祝いモーダル ---
 function showCelebration(newPhaseName) {
-    const phaseConfig = PHASES_CONFIG[newPhaseName];
-    celebrationPhaseIconElem.textContent = phaseConfig.icon;
-    celebrationTextElem.innerHTML = `${AI_NAME}が<strong>「${newPhaseName}」</strong>に進化したよ！`;
-    celebrationFeaturesElem.innerHTML = (phaseConfig.features || []).map(f => `<li>${f}</li>`).join('');
-    celebrationModal.classList.add('show');
-    updateDisplay();
+  const phaseConfig = PHASES_CONFIG[newPhaseName];
+  celebrationPhaseIconElem.textContent = phaseConfig.icon;
+  celebrationTextElem.innerHTML = `${AI_NAME}が<strong>「${newPhaseName}」</strong>に進化したよ！`;
+  celebrationFeaturesElem.innerHTML = (phaseConfig.features || []).map(f => `<li>${f}</li>`).join('');
+  celebrationModal.classList.add('show');
+  updateDisplay();
 }
+function closeCelebration() { celebrationModal.classList.remove('show'); }
 
-function closeCelebration() {
-    celebrationModal.classList.remove('show');
+// --- ステータス表示（traitsとxpの可視化） ---
+function showStatus() {
+  const existingModal = document.getElementById('statusModalContainer');
+  if (existingModal) existingModal.remove();
+
+  const masteredCount = Object.values(aiState.vocabulary).filter(v => v.mastered).length;
+  let vocabDetails = `<h3>習得語彙 (${masteredCount} / ${aiState.learned_words_count}):</h3><ul style='max-height: 150px; overflow-y:auto; border:1px solid #eee; padding:5px; list-style-position: inside;'>`;
+  if (Object.keys(aiState.vocabulary).length > 0) {
+    const sortedVocab = Object.entries(aiState.vocabulary).sort((a, b) => a[0].localeCompare(b[0], 'ja'));
+    for (const [word, item] of sortedVocab) {
+      let color = item.mastered ? 'green' : 'orange';
+      if (item.category === 'taught') color = 'blue';
+      if (item.category && item.category.startsWith('game')) color = 'purple';
+      vocabDetails += `<li style='color:${color};'>${word} (${item.count}回)</li>`;
+    }
+  } else vocabDetails += "<li>まだ語彙を習得していません。</li>";
+  vocabDetails += "</ul>";
+
+  const traitBar = (val,label)=> {
+    const mid = (val+100)/2; // 0-200→0-100
+    return `<div style="margin:4px 0;">
+      <div style="font-size:12px;margin-bottom:2px;">${label}: <b>${val}</b></div>
+      <div style="height:6px;background:#eee;border-radius:4px;">
+        <div style="width:${mid}%;height:6px;border-radius:4px;background:#8ecae6;"></div>
+      </div>
+    </div>`;
+  };
+
+  const statusModalContainer = document.createElement('div');
+  statusModalContainer.id = 'statusModalContainer';
+  statusModalContainer.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1001;";
+  statusModalContainer.onclick = () => statusModalContainer.remove();
+
+  const div = document.createElement('div');
+  div.className = "celebration show";
+  div.style.cssText = "text-align: left; max-width: 90%; width:520px; max-height:80vh; overflow-y:auto;";
+  div.onclick = (e)=>e.stopPropagation();
+
+  div.innerHTML = `
+    <h2>📊 ステータス (${AI_NAME})</h2>
+    <p><strong>フェーズ:</strong> ${aiState.phase_name} (${aiState.phase_icon})</p>
+    <p><strong>愛情度:</strong> ${aiState.love}　<strong>XP:</strong> ${aiState.xp}</p>
+    <p><strong>語彙数:</strong> ${aiState.learned_words_count}　<strong>会話回数:</strong> ${aiState.total_responses}　<strong>構文Lv:</strong> ${aiState.structure_level}</p>
+    <div style="margin:6px 0 10px;">
+      ${traitBar(aiState.traits.curiosity, "好奇心")}
+      ${traitBar(aiState.traits.empathy, "共感")}
+      ${traitBar(aiState.traits.mischief, "やんちゃ")}
+      ${traitBar(aiState.traits.diligence, "まじめ")}
+    </div>
+    <hr style="margin: 10px 0;">
+    ${vocabDetails}
+    <button onclick="document.getElementById('statusModalContainer').remove()" style="margin-top: 15px; padding: 10px 20px; background: #ff758c; color: white; border: none; border-radius: 5px; cursor: pointer; display:block; margin-left:auto; margin-right:auto;">閉じる</button>
+  `;
+  statusModalContainer.appendChild(div);
+  document.body.appendChild(statusModalContainer);
 }
 
 // --- コントロール機能 ---
-function showStatus() {
-    const existingModal = document.getElementById('statusModalContainer');
-    if (existingModal) existingModal.remove();
-
-    const masteredCount = Object.values(aiState.vocabulary).filter(v => v.mastered).length;
-    let vocabDetails = `<h3>習得した語彙リスト (${masteredCount} / ${aiState.learned_words_count} 語):</h3><ul style='max-height: 150px; overflow-y:auto; border:1px solid #eee; padding:5px; list-style-position: inside;'>`;
-    if (Object.keys(aiState.vocabulary).length > 0) {
-        const sortedVocab = Object.entries(aiState.vocabulary).sort((a, b) => a[0].localeCompare(b[0], 'ja'));
-        for (const [word, item] of sortedVocab) {
-            let color = item.mastered ? 'green' : 'orange';
-            if (item.category === 'taught') color = 'blue';
-            if (item.category.startsWith('game')) color = 'purple';
-            vocabDetails += `<li style='color:${color};'>${word} (${item.count}回)</li>`;
-        }
-    } else {
-        vocabDetails += "<li>まだ語彙を習得していません。</li>";
-    }
-    vocabDetails += "</ul>";
-
-    const statusModalContainer = document.createElement('div');
-    statusModalContainer.id = 'statusModalContainer';
-    statusModalContainer.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1001;";
-    statusModalContainer.onclick = () => statusModalContainer.remove();
-
-    const statusModalContentDiv = document.createElement('div');
-    statusModalContentDiv.className = "celebration show";
-    statusModalContentDiv.style.cssText = "text-align: left; max-width: 90%; width:500px; max-height:80vh; overflow-y:auto;";
-    statusModalContentDiv.onclick = (event) => event.stopPropagation();
-
-    statusModalContentDiv.innerHTML = `
-        <h2>📊 詳細ステータス (${AI_NAME})</h2>
-        <p><strong>現在のフェーズ:</strong> ${aiState.phase_name} (${aiState.phase_icon})</p>
-        <p><strong>愛情度:</strong> ${aiState.love}</p>
-        <p><strong>語彙数:</strong> ${aiState.learned_words_count}</p>
-        <p><strong>会話回数:</strong> ${aiState.total_responses}</p>
-        <p><strong>構文レベル:</strong> ${aiState.structure_level}</p>
-        <hr style="margin: 10px 0;">
-        ${vocabDetails}
-        <button onclick="document.getElementById('statusModalContainer').remove()" style="margin-top: 15px; padding: 10px 20px; background: #ff758c; color: white; border: none; border-radius: 5px; cursor: pointer; display:block; margin-left:auto; margin-right:auto;">閉じる</button>
-    `;
-    statusModalContainer.appendChild(statusModalContentDiv);
-    document.body.appendChild(statusModalContainer);
-}
-
 function resetAI() {
-    if (confirm(`本当にリセットしますか？${AI_NAME}のすべての学習データとAPIキー設定が失われます。`)) {
-        localStorage.removeItem(STORAGE_KEY_STATE);
-        localStorage.removeItem(STORAGE_KEY_API_KEY);
-        resetToDefaultState();
-        geminiApiKey = '';
-        apiKeyInput.value = '';
-        chatArea.innerHTML = '';
-        aiCharacterDisplayArea.style.display = 'none'; // リセット時にキャラクター非表示
-        aiSpeechBubble.style.display = 'none';
-        aiSpeechText.textContent = '';
-        addMessageToLog('システム', `${AI_NAME}がリセットされました。APIキーを再設定してください。`, 'system-message');
-        updateDisplay();
-        loadApiKey(); // APIキー設定画面を再表示
-    }
+  if (confirm(`本当にリセットしますか？${AI_NAME}のすべての学習データとAPIキー設定が失われます。`)) {
+    localStorage.removeItem(STORAGE_KEY_STATE);
+    localStorage.removeItem(STORAGE_KEY_API_KEY);
+    resetToDefaultState();
+    geminiApiKey = '';
+    apiKeyInput.value = '';
+    chatArea.innerHTML = '';
+    aiCharacterDisplayArea.style.display = 'none';
+    aiSpeechBubble.style.display = 'none';
+    aiSpeechText.textContent = '';
+    addMessageToLog('システム', `${AI_NAME}がリセットされました。APIキーを再設定してください。`, 'system-message');
+    updateDisplay();
+    loadApiKey();
+  }
 }
 
 function teachWord() {
-    const wordToTeach = prompt(`${AI_NAME}に教えたい単語を入力してください:`);
-    if (wordToTeach?.trim()) {
-        const words = getSimpleWordsFromText(wordToTeach.trim());
-        if (words.length > 0) {
-            aiState.love += words.length * 5; // 教えた単語ごとに愛情度+5
-            addMessageToLog(AI_NAME, `わーい！新しい言葉だ！「${words.join('、')}」...覚えたぷぷ！ありがとう！`, 'system-message');
-            updateVocabularyAndStats(words.join(' '), null, "taught");
-            updateDisplay();
-            saveAiState();
-            const phaseChangeResult = checkPhaseTransition();
-            if (phaseChangeResult.changed) showCelebration(phaseChangeResult.newPhase);
-        } else {
-            addMessageToLog('システム', '有効な単語として認識できませんでした。ひらがな、カタカナ、漢字で入力してください。', 'system-error');
-        }
-    }
-}
-
-// --- ミニゲーム共通 ---
-function closeMiniGameModal() {
-    if (gameTimer) clearInterval(gameTimer);
-    gameTimer = null;
-    miniGameModal.style.display = 'none';
-    currentGame = null;
-    if(userInput && !userInput.disabled) userInput.focus();
-    updateDisplay(); // ゲーム終了後の状態を再表示
-}
-
-// 報酬システムを強化
-function endGame(gameType, resultMessage) {
-    if (gameTimer) clearInterval(gameTimer);
-    gameTimer = null; // タイマーを停止
-
-    let loveBonus = 0;
-    let pupuMessage = "";
-    let additionalInfo = "";
-
-    if (gameType === "wordCollect") {
-        loveBonus = gameScore * 5; // スコアに応じてボーナス増
-        pupuMessage = `わーい！${gameScore}個も言葉を集めたね！ぷぷ、賢くなった気分！ありがとう！`;
-        additionalInfo = ` (+${loveBonus} 愛情度)`;
-    } else if (gameType === "errand") { // アルゴスケイプ
-        if (resultMessage.includes("成功")) {
-            loveBonus = 50;
-            pupuMessage = `やったー！${GAME_NAME_ERRAND}クリアだ！君と一緒だと、どんな冒険も楽しいね！`;
-        } else {
-            pupuMessage = `うーん、${GAME_NAME_ERRAND}は途中で終わっちゃったぷぷ…。でも、楽しかった！`;
-        }
-        additionalInfo = ` (+${loveBonus} 愛情度)`;
-    } else if (gameType === "shiritori") {
-        if (resultMessage.includes("勝ち") || resultMessage.includes("成功")) { // ユーザーの勝ち
-            loveBonus = shiritoriChainCount * 5; // チェーン数に応じてボーナス増
-            pupuMessage = `しりとり${shiritoriChainCount}回も続いた！すごい！ぷぷ、もっと強くなっちゃうかも！`;
-        } else { // ぷぷの勝ち or 引き分け
-            loveBonus = shiritoriChainCount * 2; // チェーン数に応じてボーナス（少なめ）
-            pupuMessage = `ぷぷの勝ちだぷぷ！でも、また遊ぼうね！`;
-        }
-        additionalInfo = ` (+${loveBonus} 愛情度)`;
-    }
-
-    if(loveBonus > 0) {
-        aiState.love += loveBonus;
-        addMessageToLog(AI_NAME, pupuMessage + additionalInfo, 'system-message');
+  const wordToTeach = prompt(`${AI_NAME}に教えたい単語を入力してください:`);
+  if (wordToTeach?.trim()) {
+    const words = getSimpleWordsFromText(wordToTeach.trim());
+    if (words.length > 0) {
+      aiState.love += words.length * 5;
+      addMessageToLog(AI_NAME, `わーい！新しい言葉だ！「${words.join('、')}」覚えたよ、ありがとう！`, 'system-message');
+      updateVocabularyAndStats(words.join(' '), null, "taught");
+      gainXp(5);
+      updateDisplay();
+      saveAiState();
+      const phaseChangeResult = checkPhaseTransition();
+      if (phaseChangeResult.changed) showCelebration(phaseChangeResult.newPhase);
     } else {
-        addMessageToLog(AI_NAME, pupuMessage, 'system-message');
+      addMessageToLog('システム', '有効な単語として認識できませんでした。ひらがな、カタカナ、漢字で入力してください。', 'system-error');
     }
-    
-
-    const messageElem = document.getElementById(`${gameType}Message`);
-    if (messageElem) messageElem.textContent = resultMessage;
-
-    updateDisplay();
-    saveAiState();
-    // モーダルは開いたまま。閉じるボタンで明示的に閉じる。
+  }
 }
 
+// =====================
+// ミニゲーム（AIを学べる表現に改修）
+// =====================
 
-// --- ミニゲーム１：ことば集めアドベンチャー ---
-let currentWordCollectData = { theme: "", words: [], decoys: [] };
-const wordCollectThemes_fallback = {
-    "たべもの": { words: ["りんご", "バナナ", "パン", "おにく", "さかな", "たまご"], decoys: ["くるま", "ボール", "えほん", "くつ", "ぼうし"] },
-    "のりもの": { words: ["くるま", "でんしゃ", "ひこうき", "ふね", "バス", "じてんしゃ"], decoys: ["りんご", "いす", "ねこ", "つくえ", "き"] },
-    "どうぶつ": { words: ["いぬ", "ねこ", "ぞう", "うさぎ", "とり", "ライオン"], decoys: ["つくえ", "ほし", "くも", "やま", "かわ"] }
-};
+// --- Game1：トークナイザー研究所（tokenize） ---
+// 既存テンプレIDを流用：wordCollect*
+// ・テーマ→「トークナイザー研究所」
+// ・objectsAreaに候補トークンを並べ、正しい分割をクリックで選ぶ
+let tokenizeData = { sentence: "", correctTokens: [], options: [] };
 
-async function generateWordCollectThemeAndWords() {
-    const objectsArea = document.getElementById('wordCollectObjectsArea');
-    if(objectsArea) objectsArea.classList.add('loading');
-
-    const promptForGemini = `
-あなたは楽しい子供向けゲームの出題者です。
-「ことば集めゲーム」のテーマと、そのテーマに関連する簡単な日本語の単語（名詞や動詞、形容詞など）を6個、そしてテーマとは全く関係ないダミーの単語を5個、考えてください。
-単語はひらがなかカタカナで、子供にも分かりやすいものにしてください。
-語彙レベルは現在の「ぷぷ」（${aiState.phase_name}、構文レベル${aiState.structure_level}）に合わせて調整してください。
-
-出力形式は以下のJSON形式でお願いします。JSON以外の余計な文字は一切含めないでください:
-{
-  "theme": "（ここにテーマ名。例：うみのおともだち）",
-  "words": ["（単語1）", "（単語2）", "（単語3）", "（単語4）", "（単語5）", "（単語6）"],
-  "decoys": ["（ダミー単語1）", "（ダミー単語2）", "（ダミー単語3）", "（ダミー単語4）", "（ダミー単語5）"]
-}
-`;
-    try {
-        let responseText = await callGeminiAPI(promptForGemini, true);
-        if (responseText.startsWith("ERROR_")) throw new Error(`API returned error: ${responseText}`);
-        
-        const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
-        if (jsonMatch && jsonMatch[1]) responseText = jsonMatch[1];
-        else responseText = responseText.replace(/^```json\s*/, '').replace(/\s*```$/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
-        responseText = responseText.trim();
-
-        const parsedResponse = JSON.parse(responseText);
-        if (parsedResponse.theme && Array.isArray(parsedResponse.words) && Array.isArray(parsedResponse.decoys) &&
-            parsedResponse.words.length >= 5 && parsedResponse.decoys.length >= 4) {
-            currentWordCollectData = parsedResponse;
-            return true;
-        } else {
-            console.error("Geminiからの応答形式が不正です (パース後):", parsedResponse);
-            throw new Error("API応答のJSON形式が期待通りではありません。");
-        }
-    } catch (error) {
-        console.error("ことば集めテーマ生成エラー (JSONパース含む):", error);
-        addMessageToLog("システム", `ことば集めテーマ生成エラー: ${error.message}。固定テーマで遊びます。`, "system-error");
-        return false;
-    } finally {
-         if(objectsArea) objectsArea.classList.remove('loading');
+function simpleTokenizerCandidates(sentence){
+  // ざっくり：ひらがな/カタカナ/漢字/英数の連続を1塊に、さらに2～4文字で分割候補を生成
+  const chunks = sentence.match(/[\u3040-\u309F]+|[\u30A0-\u30FF]+|[\u4E00-\u9FEA\u3005-\u3007]+|[a-zA-Z0-9]+|[^\s]/g) || [];
+  const candidates = new Set();
+  chunks.forEach(ch=>{
+    if (ch.length <= 4) candidates.add(ch);
+    for(let size=2; size<=4; size++){
+      for(let i=0;i<=ch.length-size;i++){
+        candidates.add(ch.slice(i,i+size));
+      }
     }
+  });
+  return Array.from(candidates).filter(t=>t.trim().length>0);
 }
 
+async function generateTokenizeTask() {
+  const sampleSentences = [
+    "あした は ゆうえんち に いく",
+    "りんご と ミルク を かう",
+    "AI は ことば を 学ぶ",
+    "きょう の てんき は はれ",
+    "ドラゴン の ぷぷ は げんき"
+  ];
+  // APIキーがあれば1文生成を試す（失敗時はサンプル）
+  let sentence = sampleSentences[Math.floor(Math.random()*sampleSentences.length)];
+  if (geminiApiKey) {
+    try{
+      const prompt = `以下の条件で1文だけ返してください。
+- 日本語の簡単な短文（子供でも読める）
+- ひらがな中心、名詞や助詞が混ざる
+- 出力は文のみ。余計な語は不要。`;
+      const res = await callGeminiAPI(prompt, true);
+      const line = (res||"").split(/\n/).map(s=>s.trim()).filter(Boolean)[0];
+      if (line && line.length<=20) sentence = line;
+    }catch{}
+  }
+  // 「正しい分割」を今回はスペース区切りがあればそれを優先、なければ単純分割
+  const base = sentence.replace(/\s+/g,' ').trim();
+  const correctTokens = base.includes(' ') ? base.split(' ') : (base.match(/[\u3040-\u309F]+|[\u30A0-\u30FF]+|[\u4E00-\u9FEA\u3005-\u3007]+|[a-zA-Z0-9]+|[^\s]/g) || []);
+  const options = simpleTokenizerCandidates(base);
+  tokenizeData = { sentence: base, correctTokens, options };
+}
 
 async function startGameWordCollect() {
-    if (currentGame) return;
-    currentGame = "wordCollect";
-    miniGameModal.style.display = 'flex';
-    miniGameTitle.textContent = "ことば集めアドベンチャー";
-    const template = document.getElementById('wordCollectGameTemplate').content.cloneNode(true);
-    miniGameArea.innerHTML = '';
-    miniGameArea.appendChild(template);
-    const objectsArea = document.getElementById('wordCollectObjectsArea');
+  if (currentGame) return;
+  currentGame = "tokenize";
+  miniGameModal.style.display = 'flex';
+  miniGameTitle.textContent = "トークナイザー研究所（ことばを区切ってみよう）";
+  const template = document.getElementById('wordCollectGameTemplate').content.cloneNode(true);
+  miniGameArea.innerHTML = '';
+  miniGameArea.appendChild(template);
 
-    const useGemini = geminiApiKey !== '';
-    let themeGenerated = false;
+  const objectsArea = document.getElementById('wordCollectObjectsArea');
+  document.getElementById('wordCollectTheme').textContent = "狙い：モデルが読む“かたまり（トークン）”を理解しよう";
+  objectsArea.innerHTML = '';
+  gameScore = 0;
+  gameTimeLeft = 40;
 
-    if (useGemini) themeGenerated = await generateWordCollectThemeAndWords();
-    
-    if (!themeGenerated) {
-        const themes = Object.keys(wordCollectThemes_fallback);
-        const themeName = themes[Math.floor(Math.random() * themes.length)];
-        currentWordCollectData = {
-            theme: themeName,
-            words: [...wordCollectThemes_fallback[themeName].words],
-            decoys: [...wordCollectThemes_fallback[themeName].decoys]
-        };
-    }
+  await generateTokenizeTask();
 
-    document.getElementById('wordCollectTheme').textContent = currentWordCollectData.theme;
-    objectsArea.innerHTML = '';
+  // 課題文表示
+  const header = document.createElement('div');
+  header.style.margin = "6px 0 8px";
+  header.innerHTML = `<b>文</b>：${tokenizeData.sentence}<br><small>※正しいかたまりをクリック（最大${tokenizeData.correctTokens.length}個）</small>`;
+  objectsArea.parentElement.insertBefore(header, objectsArea);
 
-    let displayWords = [...currentWordCollectData.words, ...currentWordCollectData.decoys];
-    displayWords = displayWords.sort(() => 0.5 - Math.random());
+  // 候補をシャッフルして表示
+  let display = [...tokenizeData.options];
+  display = display.sort(()=>0.5-Math.random()).slice(0, Math.max(12, tokenizeData.correctTokens.length+6));
+  const chosen = new Set();
+  display.forEach(tok=>{
+    const div = document.createElement('div');
+    div.className = 'word-object';
+    div.textContent = tok;
+    div.onclick = ()=>{
+      if (gameTimeLeft<=0 || div.dataset.clicked) return;
+      div.dataset.clicked = true;
+      chosen.add(tok);
+      const isHit = tokenizeData.correctTokens.includes(tok);
+      if (isHit){ gameScore++; div.style.backgroundColor="#a0e8a0"; div.style.borderColor="#5cb85c"; }
+      else { gameScore = Math.max(0, gameScore-1); div.style.backgroundColor="#f8a0a0"; div.style.borderColor="#d9534f"; }
+      document.getElementById('wordCollectScore').textContent = gameScore;
+    };
+    objectsArea.appendChild(div);
+  });
 
-    displayWords.forEach(word => {
-        const wordDiv = document.createElement('div');
-        wordDiv.className = 'word-object';
-        wordDiv.textContent = word;
-        wordDiv.onclick = () => {
-            if (gameTimeLeft <= 0 || wordDiv.dataset.clicked) return;
-            if (currentWordCollectData.words.includes(word)) {
-                gameScore++;
-                document.getElementById('wordCollectScore').textContent = gameScore;
-                wordDiv.style.backgroundColor = "#a0e8a0";
-                wordDiv.style.borderColor = "#5cb85c";
-                wordDiv.dataset.clicked = true;
-                updateVocabularyAndStats(word, null, "game_learned");
-            } else {
-                wordDiv.style.backgroundColor = "#f8a0a0";
-                wordDiv.style.borderColor = "#d9534f";
-                gameScore = Math.max(0, gameScore - 1);
-                document.getElementById('wordCollectScore').textContent = gameScore;
-                wordDiv.dataset.clicked = true;
-            }
-        };
-        objectsArea.appendChild(wordDiv);
-    });
+  document.getElementById('wordCollectScore').textContent = gameScore;
+  document.getElementById('wordCollectTimeLeft').textContent = gameTimeLeft;
+  document.getElementById('wordCollectMessage').textContent =
+    `${AI_NAME}「トークン（かたまり）を当てよう！正解ほどモデルは読みやすいよ！」`;
 
-    gameScore = 0;
-    gameTimeLeft = 30;
+  gameTimer = setInterval(()=>{
+    gameTimeLeft--;
     document.getElementById('wordCollectTimeLeft').textContent = gameTimeLeft;
-    document.getElementById('wordCollectScore').textContent = gameScore;
-    document.getElementById('wordCollectMessage').textContent = `${AI_NAME}「テーマ「${currentWordCollectData.theme}」の言葉をあつめてぷぷ！」`;
-
-    gameTimer = setInterval(() => {
-        gameTimeLeft--;
-        document.getElementById('wordCollectTimeLeft').textContent = gameTimeLeft;
-        if (gameTimeLeft <= 0) {
-            endGame("wordCollect", `時間切れ！ スコア: ${gameScore}点でした！`);
-        }
-    }, 1000);
+    if (gameTimeLeft<=0){
+      const total = tokenizeData.correctTokens.length;
+      const hit = tokenizeData.correctTokens.filter(t=>[...chosen].includes(t)).length;
+      const msg = `結果：正解 ${hit}/${total}。モデルは“かたまり”で読むから、上手に切れると理解しやすいよ！`;
+      endGame("wordCollect", msg); // 互換（ID流用）
+    }
+  },1000);
 }
 
-// --- ミニゲーム２：アルゴスケイプ (おつかいゲーム) ---
+// --- Game2：アルゴスケイプ（強化学習の雰囲気を体験） ---
 function startGameErrand() {
-    if (currentGame) return;
-    currentGame = "errand";
-    miniGameModal.style.display = 'flex';
-    miniGameTitle.textContent = GAME_NAME_ERRAND;
-    const template = document.getElementById('errandGameTemplate').content.cloneNode(true);
-    miniGameArea.innerHTML = '';
-    miniGameArea.appendChild(template);
+  if (currentGame) return;
+  currentGame = "errand";
+  miniGameModal.style.display = 'flex';
+  miniGameTitle.textContent = GAME_NAME_ERRAND;
+  const template = document.getElementById('errandGameTemplate').content.cloneNode(true);
+  miniGameArea.innerHTML = '';
+  miniGameArea.appendChild(template);
 
-    const mapAreaElem = document.getElementById('errandMapArea');
-    if (mapAreaElem) {
-        mapAreaElem.style.width = `${MAP_WIDTH_TILES * TILE_SIZE}px`;
-        mapAreaElem.style.height = `${MAP_HEIGHT_TILES * TILE_SIZE}px`;
-    }
+  const mapAreaElem = document.getElementById('errandMapArea');
+  if (mapAreaElem) {
+    mapAreaElem.style.width = `${MAP_WIDTH_TILES * TILE_SIZE}px`;
+    mapAreaElem.style.height = `${MAP_HEIGHT_TILES * TILE_SIZE}px`;
+  }
 
-    initializeErrandMap();
-    drawErrandMap();
-    updateErrandObjective();
+  initializeErrandMap(); // 壁=損失の谷、🍎=データA、🥛=データB、🏠=汎化の家
+  drawErrandMap();
+  updateErrandObjective();
 
-    document.getElementById('errandMessage').textContent = `${AI_NAME}「おつかい、がんばるぷぷー！」`;
-    document.querySelectorAll('#errandControls button').forEach(btn => {
-        btn.onclick = (e) => movePlayerErrand(e.target.dataset.direction);
-        btn.disabled = false;
-    });
+  document.getElementById('errandMessage').textContent =
+    `${AI_NAME}「報酬（🍎🥛）をあつめて🏠へ！壁（損失）は回避だよ！」`;
+  document.querySelectorAll('#errandControls button').forEach(btn => {
+    btn.onclick = (e) => movePlayerErrand(e.target.dataset.direction);
+    btn.disabled = false;
+  });
 }
 
 function initializeErrandMap() {
-    mapGrid = Array(MAP_HEIGHT_TILES).fill(null).map(() => Array(MAP_WIDTH_TILES).fill(0));
-    playerPos = { x: 0, y: 0 };
+  mapGrid = Array(MAP_HEIGHT_TILES).fill(null).map(() => Array(MAP_WIDTH_TILES).fill(0));
+  playerPos = { x: 0, y: 0 };
 
-    for(let i=0; i < MAP_WIDTH_TILES * MAP_HEIGHT_TILES * 0.15; i++) {
-        const rx = Math.floor(Math.random() * MAP_WIDTH_TILES);
-        const ry = Math.floor(Math.random() * MAP_HEIGHT_TILES);
-        if ((rx === 0 && ry === 0) || (rx === 1 && ry === 0) || (rx === 0 && ry === 1)) continue;
-        mapGrid[ry][rx] = 1;
+  // 壁（＝損失の谷）を少し多めに
+  for(let i=0; i < MAP_WIDTH_TILES * MAP_HEIGHT_TILES * 0.15; i++) {
+    const rx = Math.floor(Math.random() * MAP_WIDTH_TILES);
+    const ry = Math.floor(Math.random() * MAP_HEIGHT_TILES);
+    if ((rx === 0 && ry === 0) || (rx === 1 && ry === 0) || (rx === 0 && ry === 1)) continue;
+    mapGrid[ry][rx] = 1; // wall
+  }
+
+  const placeItem = (itemId) => {
+    let placed = false;
+    while(!placed) {
+      const rx = Math.floor(Math.random() * MAP_WIDTH_TILES);
+      const ry = Math.floor(Math.random() * MAP_HEIGHT_TILES);
+      if (mapGrid[ry][rx] === 0 && !(rx === 0 && ry === 0)) {
+        mapGrid[ry][rx] = itemId; placed = true;
+      }
     }
+  };
+  placeItem(2); // 🍎データA
+  placeItem(3); // 🥛データB
+  placeItem(4); // 🏠汎化の家
 
-    const placeItem = (itemId) => {
-        let placed = false;
-        while(!placed) {
-            const rx = Math.floor(Math.random() * MAP_WIDTH_TILES);
-            const ry = Math.floor(Math.random() * MAP_HEIGHT_TILES);
-            if (mapGrid[ry][rx] === 0 && !(rx === 0 && ry === 0)) {
-                mapGrid[ry][rx] = itemId;
-                placed = true;
-            }
-        }
-    };
-    placeItem(2); // 店A (リンゴ)
-    placeItem(3); // 店B (ミルク)
-    placeItem(4); // ゴール (おうち)
-
-    errandItemsToGet = [
-        { name: "りんご", storeId: 2, collected: false, icon: "🍎" },
-        { name: "ミルク", storeId: 3, collected: false, icon: "🥛" }
-    ];
+  errandItemsToGet = [
+    { name: "データA", storeId: 2, collected: false, icon: "🍎" },
+    { name: "データB", storeId: 3, collected: false, icon: "🥛" }
+  ];
 }
 
 function drawErrandMap() {
-    const mapArea = document.getElementById('errandMapArea');
-    const playerElem = document.getElementById('errandPlayer');
-    if (!mapArea || !playerElem) {
-        console.error("マップ要素またはプレイヤー要素が見つかりません。");
-        return;
+  const mapArea = document.getElementById('errandMapArea');
+  const playerElem = document.getElementById('errandPlayer');
+  if (!mapArea || !playerElem) { console.error("マップ要素が見つかりません。"); return; }
+
+  mapArea.innerHTML = '';
+  mapArea.appendChild(playerElem);
+
+  for (let r = 0; r < MAP_HEIGHT_TILES; r++) {
+    for (let c = 0; c < MAP_WIDTH_TILES; c++) {
+      const tileValue = mapGrid[r][c];
+      let tileChar = "", tileTitle = "", isWall = false;
+
+      if (tileValue === 1) {
+        isWall = true;
+        const wallDiv = document.createElement('div');
+        wallDiv.className = 'map-item';
+        wallDiv.style.backgroundColor = '#8d6e63';
+        wallDiv.style.left = `${c * TILE_SIZE}px`;
+        wallDiv.style.top = `${r * TILE_SIZE}px`;
+        wallDiv.title = "損失の谷（Loss）";
+        mapArea.appendChild(wallDiv);
+      }
+
+      const itemToGet = errandItemsToGet.find(item => item.storeId === tileValue && !item.collected);
+      if (!isWall && itemToGet) {
+        tileChar = itemToGet.icon;
+        tileTitle = itemToGet.name;
+      } else if (!isWall && tileValue === 4) {
+        tileChar = "🏠"; tileTitle = "汎化の家（Generalization）";
+      }
+
+      if (tileChar) {
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'map-item';
+        itemDiv.textContent = tileChar;
+        itemDiv.style.left = `${c * TILE_SIZE}px`;
+        itemDiv.style.top = `${r * TILE_SIZE}px`;
+        itemDiv.title = tileTitle;
+        mapArea.appendChild(itemDiv);
+      }
     }
-
-    mapArea.innerHTML = '';
-    mapArea.appendChild(playerElem);
-
-    for (let r = 0; r < MAP_HEIGHT_TILES; r++) {
-        for (let c = 0; c < MAP_WIDTH_TILES; c++) {
-            const tileValue = mapGrid[r][c];
-            let tileChar = "";
-            let tileTitle = "";
-            let isWall = false;
-
-            if (tileValue === 1) {
-                isWall = true;
-                const wallDiv = document.createElement('div');
-                wallDiv.className = 'map-item';
-                wallDiv.style.backgroundColor = '#8d6e63';
-                wallDiv.style.left = `${c * TILE_SIZE}px`;
-                wallDiv.style.top = `${r * TILE_SIZE}px`;
-                wallDiv.title = "かべ";
-                mapArea.appendChild(wallDiv);
-            }
-
-            const itemToGet = errandItemsToGet.find(item => item.storeId === tileValue && !item.collected);
-            if (!isWall && itemToGet) {
-                tileChar = itemToGet.icon;
-                tileTitle = itemToGet.name + "のお店";
-            } else if (!isWall && tileValue === 4) {
-                tileChar = "🏠";
-                tileTitle = "おうち";
-            }
-
-            if (tileChar) {
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'map-item';
-                itemDiv.textContent = tileChar;
-                itemDiv.style.left = `${c * TILE_SIZE}px`;
-                itemDiv.style.top = `${r * TILE_SIZE}px`;
-                itemDiv.title = tileTitle;
-                mapArea.appendChild(itemDiv);
-            }
-        }
-    }
-    playerElem.style.left = `${playerPos.x * TILE_SIZE}px`;
-    playerElem.style.top = `${playerPos.y * TILE_SIZE}px`;
+  }
+  playerElem.style.left = `${playerPos.x * TILE_SIZE}px`;
+  playerElem.style.top = `${playerPos.y * TILE_SIZE}px`;
 }
 
 function updateErrandObjective() {
-    const objectiveElem = document.getElementById('errandObjective');
-    if(!objectiveElem) return;
-    const uncollected = errandItemsToGet.filter(item => !item.collected);
-    let text = "目的: ";
-    if (uncollected.length > 0) {
-        text += uncollected.map(item => item.name).join(" と ") + " をゲット！ ";
-    } else {
-        text += "おうち（🏠）に帰る！";
-    }
-    objectiveElem.textContent = text;
+  const el = document.getElementById('errandObjective');
+  if(!el) return;
+  const uncollected = errandItemsToGet.filter(item => !item.collected);
+  let text = "目的: ";
+  if (uncollected.length > 0) text += uncollected.map(i=>i.name).join(" と ") + " を集める → ";
+  text += "🏠へ帰る";
+  el.textContent = text;
 }
 
 function movePlayerErrand(direction) {
-    let newX = playerPos.x;
-    let newY = playerPos.y;
-    if (direction === "up") newY--;
-    if (direction === "down") newY++;
-    if (direction === "left") newX--;
-    if (direction === "right") newX++;
+  let newX = playerPos.x, newY = playerPos.y;
+  if (direction === "up") newY--;
+  if (direction === "down") newY++;
+  if (direction === "left") newX--;
+  if (direction === "right") newX++;
 
-    if (newY >= 0 && newY < MAP_HEIGHT_TILES && newX >= 0 && newX < MAP_WIDTH_TILES && mapGrid[newY][newX] !== 1) {
-        playerPos.x = newX;
-        playerPos.y = newY;
-        document.getElementById('errandPlayer').style.left = `${playerPos.x * TILE_SIZE}px`;
-        document.getElementById('errandPlayer').style.top = `${playerPos.y * TILE_SIZE}px`;
+  if (newY>=0 && newY<MAP_HEIGHT_TILES && newX>=0 && newX<MAP_WIDTH_TILES && mapGrid[newY][newX] !== 1) {
+    playerPos.x = newX; playerPos.y = newY;
+    document.getElementById('errandPlayer').style.left = `${playerPos.x * TILE_SIZE}px`;
+    document.getElementById('errandPlayer').style.top = `${playerPos.y * TILE_SIZE}px`;
 
-        const currentTileValue = mapGrid[playerPos.y][playerPos.x];
-        errandItemsToGet.forEach(item => {
-            if (!item.collected && currentTileValue === item.storeId) {
-                item.collected = true;
-                document.getElementById('errandMessage').textContent = `${item.name}をゲットしたぷぷ！`;
-                drawErrandMap();
-                updateErrandObjective();
-            }
-        });
+    const currentTileValue = mapGrid[playerPos.y][playerPos.x];
+    errandItemsToGet.forEach(item=>{
+      if (!item.collected && currentTileValue === item.storeId) {
+        item.collected = true;
+        document.getElementById('errandMessage').textContent = `${item.name}（報酬）をゲット！損失を避けつつ進もう！`;
+        // 報酬＝愛情とXPに還元
+        aiState.love += 20; gainXp(10);
+        drawErrandMap(); updateErrandObjective();
+      }
+    });
 
-        if (currentTileValue === 4 && errandItemsToGet.every(item => item.collected)) {
-            endGame("errand", `${GAME_NAME_ERRAND}大成功！えらい！`);
-            document.querySelectorAll('#errandControls button').forEach(btn => btn.disabled = true); // ゲーム終了
-        }
+    if (currentTileValue === 4 && errandItemsToGet.every(i=>i.collected)) {
+      endGame("errand", `${GAME_NAME_ERRAND} 成功！「報酬を集めて家（汎化）へ」— これが強化学習の直感だよ！`);
+      document.querySelectorAll('#errandControls button').forEach(btn => btn.disabled = true);
     }
+  }
 }
 
-// --- ミニゲーム３：言葉のしりとりチェーン ---
+// --- Game3：言葉のしりとりチェーン（分布の感覚あそび） ---
+// ルールは互換。メッセージで「分布（続きやすさ）」の感覚へ誘導
 const katakanaToHiragana = (str) => {
-    const kanaMap = {
-        'ァ': 'あ', 'ィ': 'い', 'ゥ': 'う', 'ェ': 'え', 'ォ': 'お', 'カ': 'か', 'キ': 'き', 'ク': 'く', 'ケ': 'け', 'コ': 'こ',
-        'サ': 'さ', 'シ': 'し', 'ス': 'す', 'セ': 'せ', 'ソ': 'そ', 'タ': 'た', 'チ': 'ち', 'ツ': 'つ', 'テ': 'て', 'ト': 'と',
-        'ナ': 'な', 'ニ': 'に', 'ヌ': 'ぬ', 'ネ': 'ね', 'ノ': 'の', 'ハ': 'は', 'ヒ': 'ひ', 'フ': 'ふ', 'ヘ': 'へ', 'ホ': 'ほ',
-        'マ': 'ま', 'ミ': 'み', 'ム': 'む', 'メ': 'め', 'モ': 'も', 'ヤ': 'や', 'ユ': 'ゆ', 'ヨ': 'よ', 'ラ': 'ら', 'リ': 'り',
-        'ル': 'る', 'レ': 'れ', 'ロ': 'ろ', 'ワ': 'わ', 'ヲ': 'を', 'ン': 'ん', 'ガ': 'が', 'ギ': 'ぎ', 'グ': 'ぐ', 'ゲ': 'げ',
-        'ゴ': 'ご', 'ザ': 'ざ', 'ジ': 'じ', 'ズ': 'ず', 'ゼ': 'ぜ', 'ゾ': 'ぞ', 'ダ': 'だ', 'ヂ': 'ぢ', 'ヅ': 'づ', 'デ': 'で',
-        'ド': 'ど', 'バ': 'ば', 'ビ': 'び', 'ブ': 'ぶ', 'ベ': 'べ', 'ボ': 'ぼ', 'パ': 'ぱ', 'ピ': 'ぴ', 'プ': 'ぷ', 'ペ': 'ぺ',
-        'ポ': 'ぽ', 'ャ': 'や', 'ュ': 'ゆ', 'ョ': 'よ', 'ッ': 'つ', 'ー': 'ー', 'ヰ': 'ゐ', 'ヱ': 'ゑ', 'ヴ': 'ゔ', 'ヶ': 'ヶ', 'ヵ': 'か',
-    };
-    let hiraganaStr = '';
-    for (let i = 0; i < str.length; i++) {
-        let char = str[i];
-        if (str[i+1] === 'ﾞ') {
-            const base = { 'ｶ': 'が', 'ｷ': 'ぎ', 'ｸ': 'ぐ', 'ｹ': 'げ', 'ｺ': 'ご', 'ｻ': 'ざ', 'ｼ': 'じ', 'ｽ': 'ず', 'ｾ': 'ぜ', 'ｿ': 'そ', 'ﾀ': 'だ', 'ﾁ': 'ぢ', 'ﾂ': 'づ', 'ﾃ': 'で', 'ﾄ': 'ど', 'ﾊ': 'ば', 'ﾋ': 'び', 'ﾌ': 'ぶ', 'ﾍ': 'べ', 'ﾎ': 'ぼ' };
-            if (base[char]) { hiraganaStr += base[char]; i++; continue; }
-        } else if (str[i+1] === 'ﾟ') {
-            const base = { 'ﾊ': 'ぱ', 'ﾋ': 'ぴ', 'ﾌ': 'ぷ', 'ﾍ': 'ぺ', 'ﾎ': 'ぽ' };
-            if (base[char]) { hiraganaStr += base[char]; i++; continue; }
-        }
-        hiraganaStr += kanaMap[char] || char;
-    }
-    return hiraganaStr;
+  const map = {'ァ':'あ','ィ':'い','ゥ':'う','ェ':'え','ォ':'お','カ':'か','キ':'き','ク':'く','ケ':'け','コ':'こ',
+  'サ':'さ','シ':'し','ス':'す','セ':'せ','ソ':'そ','タ':'た','チ':'ち','ツ':'つ','テ':'て','ト':'と',
+  'ナ':'な','ニ':'に','ヌ':'ぬ','ネ':'ね','ノ':'の','ハ':'は','ヒ':'ひ','フ':'ふ','ヘ':'へ','ホ':'ほ',
+  'マ':'ま','ミ':'み','ム':'む','メ':'め','モ':'も','ヤ':'や','ユ':'ゆ','ヨ':'よ','ラ':'ら','リ':'り',
+  'ル':'る','レ':'れ','ロ':'ろ','ワ':'わ','ヲ':'を','ン':'ん','ガ':'が','ギ':'ぎ','グ':'ぐ','ゲ':'げ',
+  'ゴ':'ご','ザ':'ざ','ジ':'じ','ズ':'ず','ゼ':'ぜ','ゾ':'ぞ','ダ':'だ','ヂ':'ぢ','ヅ':'づ','デ':'で',
+  'ド':'ど','バ':'ば','ビ':'び','ブ':'ぶ','ベ':'べ','ボ':'ぼ','パ':'ぱ','ピ':'ぴ','プ':'ぷ','ペ':'ぺ','ポ':'ぽ',
+  'ャ':'や','ュ':'ゆ','ョ':'よ','ッ':'つ','ー':'ー','ヰ':'ゐ','ヱ':'ゑ','ヴ':'ゔ','ヶ':'ヶ','ヵ':'か'};
+  let out=''; for (let i=0;i<str.length;i++){ out += map[str[i]]||str[i]; } return out;
 };
-
 const getShiritoriLastChar = (word) => {
-    if (!word || word.length === 0) return '';
-    word = katakanaToHiragana(word).toLowerCase();
-    let lastChar = word.slice(-1);
-
-    if (lastChar === 'ん') return 'ん';
-    if (lastChar === 'っ' && word.length > 1) return getShiritoriLastChar(word.slice(0, -1));
-    if (lastChar === 'ー' && word.length > 1) {
-        let prevChar = word.slice(-2, -1);
-        const vowelMap = {'あ': 'あ', 'い': 'い', 'う': 'う', 'え': 'え', 'お': 'お', 'か': 'あ', 'き': 'い', 'く': 'う', 'け': 'え', 'こ': 'お', 'さ': 'あ', 'し': 'い', 'す': 'う', 'せ': 'え', 'そ': 'お', 'た': 'あ', 'ち': 'い', 'つ': 'う', 'て': 'え', 'と': 'お', 'な': 'あ', 'に': 'い', 'ぬ': 'う', 'ね': 'え', 'の': 'お', 'は': 'あ', 'ひ': 'い', 'ふ': 'う', 'へ': 'え', 'ほ': 'お', 'ま': 'あ', 'み': 'い', 'む': 'う', 'め': 'え', 'も': 'お', 'や': 'あ', 'ゆ': 'う', 'よ': 'お', 'ら': 'あ', 'り': 'い', 'る': 'う', 'れ': 'え', 'ろ': 'お', 'わ': 'あ', 'を': 'お', 'ん': 'ん'};
-        const dakutenBaseChar = {'が': 'か', 'ぎ': 'き', 'ぐ': 'ぐ', 'げ': 'け', 'ご': 'こ', 'ざ': 'さ', 'じ': 'し', 'ず': 'す', 'ぜ': 'ぜ', 'ぞ': 'ぞ', 'だ': 'た', 'ぢ': 'ち', 'づ': 'つ', 'で': 'で', 'ど': 'と', 'ば': 'は', 'び': 'ひ', 'ぶ': 'ふ', 'べ': 'べ', 'ぼ': 'ほ', 'ぱ': 'は', 'ぴ': 'ひ', 'ぷ': 'ふ', 'ぺ': 'ぺ', 'ぽ': 'ほ'};
-        let baseChar = dakutenBaseChar[prevChar] || prevChar;
-        return vowelMap[baseChar] || prevChar;
-    }
-    const youonMap = {'ゃ': 'や', 'ゅ': 'ゆ', 'ょ': 'よ'};
-    lastChar = youonMap[lastChar] || lastChar;
-    const dakutenToSeionMap = {'が': 'か', 'ぎ': 'き', 'ぐ': 'く', 'げ': 'け', 'ご': 'こ', 'ざ': 'さ', 'じ': 'し', 'す': 'す', 'ぜ': 'ぜ', 'ぞ': 'ぞ', 'だ': 'た', 'ぢ': 'ち', 'づ': 'つ', 'で': 'で', 'ど': 'と', 'ば': 'は', 'び': 'ひ', 'ぶ': 'ふ', 'べ': 'べ', 'ぼ': 'ほ', 'ぱ': 'は', 'ぴ': 'ひ', 'ぷ': 'ふ', 'ぺ': 'ぺ', 'ぽ': 'ほ'};
-    return dakutenToSeionMap[lastChar] || lastChar;
+  if (!word || word.length===0) return '';
+  word = katakanaToHiragana(word).toLowerCase();
+  let last = word.slice(-1);
+  if (last==='ん') return 'ん';
+  if (last==='っ' && word.length>1) return getShiritoriLastChar(word.slice(0,-1));
+  if (last==='ー' && word.length>1){
+    let prev=word.slice(-2,-1);
+    const vm={'あ':'あ','い':'い','う':'う','え':'え','お':'お','か':'あ','き':'い','く':'う','け':'え','こ':'お','さ':'あ','し':'い','す':'う','せ':'え','そ':'お','た':'あ','ち':'い','つ':'う','て':'え','と':'お','な':'あ','に':'い','ぬ':'う','ね':'え','の':'お','は':'あ','ひ':'い','ふ':'う','へ':'え','ほ':'お','ま':'あ','み':'い','む':'う','め':'え','も':'お','や':'あ','ゆ':'う','よ':'お','ら':'あ','り':'い','る':'う','れ':'え','ろ':'お','わ':'あ','を':'お','ん':'ん'};
+    return vm[prev]||prev;
+  }
+  const ym={'ゃ':'や','ゅ':'ゆ','ょ':'よ'}; last = ym[last]||last;
+  const d2s={'が':'か','ぎ':'き','ぐ':'く','げ':'け','ご':'こ','ざ':'さ','じ':'し','ず':'す','ぜ':'ぜ','ぞ':'ぞ','だ':'た','ぢ':'ち','づ':'つ','で':'で','ど':'と','ば':'は','び':'ひ','ぶ':'ふ','べ':'べ','ぼ':'ほ','ぱ':'は','ぴ':'ひ','ぷ':'ふ','ぺ':'ぺ','ぽ':'ほ'};
+  return d2s[last]||last;
 };
-
 const getShiritoriFirstChar = (word) => {
-    if (!word || word.length === 0) return '';
-    word = katakanaToHiragana(word).toLowerCase();
-    let firstChar = word.slice(0, 1);
-    const youonMap = {'ゃ': 'や', 'ゅ': 'ゆ', 'ょ': 'よ'};
-    firstChar = youonMap[firstChar] || firstChar;
-    return firstChar;
+  if (!word || word.length===0) return '';
+  word = katakanaToHiragana(word).toLowerCase();
+  let first = word.slice(0,1);
+  const ym={'ゃ':'や','ゅ':'ゆ','ょ':'よ'}; return ym[first]||first;
 };
-
 const isShiritoriMatch = (prevChar, currChar) => {
-    const normalizedPrev = getShiritoriLastChar(prevChar);
-    const normalizedCurr = getShiritoriFirstChar(currChar);
-
-    if (normalizedPrev === normalizedCurr) return true;
-    
-    const seionToDakutenMap = {
-        'か': ['が'], 'き': ['ぎ'], 'く': ['ぐ'], 'け': ['げ'], 'こ': ['ご'],
-        'さ': ['ざ'], 'し': ['じ'], 'す': ['ず'], 'せ': ['ぜ'], 'そ': ['ぞ'],
-        'た': ['だ'], 'ち': ['ぢ'], 'つ': ['づ'], 'て': ['で'], 'と': ['ど'],
-        'は': ['ば', 'ぱ'], 'ひ': ['び', 'ぴ'], 'ふ': ['ぶ', 'ぷ'], 'へ': ['べ', 'ぺ'], 'ほ': ['ぼ', 'ぽ']
-    };
-    if (seionToDakutenMap[normalizedPrev]?.includes(normalizedCurr)) return true;
-    return false;
+  const p = getShiritoriLastChar(prevChar);
+  const c = getShiritoriFirstChar(currChar);
+  if (p===c) return true;
+  const s2d={'か':['が'],'き':['ぎ'],'く':['ぐ'],'け':['げ'],'こ':['ご'],'さ':['ざ'],'し':['じ'],'す':['ず'],'せ':['ぜ'],'そ':['ぞ'],'た':['だ'],'ち':['ぢ'],'つ':['づ'],'て':['で'],'と':['ど'],'は':['ば','ぱ'],'ひ':['び','ぴ'],'ふ':['ぶ','ぷ'],'へ':['べ','ぺ'],'ほ':['ぼ','ぽ']};
+  return s2d[p]?.includes(c) || false;
 };
-
 
 function startGameShiritori() {
-    if (currentGame) return;
-    currentGame = "shiritori";
-    miniGameModal.style.display = 'flex';
-    miniGameTitle.textContent = "言葉のしりとりチェーン";
-    const template = document.getElementById('shiritoriGameTemplate').content.cloneNode(true);
-    miniGameArea.innerHTML = '';
-    miniGameArea.appendChild(template);
+  if (currentGame) return;
+  currentGame = "shiritori";
+  miniGameModal.style.display = 'flex';
+  miniGameTitle.textContent = "言葉のしりとりチェーン（分布の感覚）";
+  const template = document.getElementById('shiritoriGameTemplate').content.cloneNode(true);
+  miniGameArea.innerHTML = '';
+  miniGameArea.appendChild(template);
 
-    shiritoriCurrentWordForDisplay = "しりとり";
-    shiritoriCurrentWordForLogic = katakanaToHiragana(shiritoriCurrentWordForDisplay.toLowerCase());
-    shiritoriUsedWords = new Set([shiritoriCurrentWordForLogic]);
-    shiritoriChainCount = 0;
+  shiritoriCurrentWordForDisplay = "しりとり";
+  shiritoriCurrentWordForLogic = katakanaToHiragana(shiritoriCurrentWordForDisplay.toLowerCase());
+  shiritoriUsedWords = new Set([shiritoriCurrentWordForLogic]);
+  shiritoriChainCount = 0;
 
-    document.getElementById('shiritoriPrevWord').textContent = shiritoriCurrentWordForDisplay;
-    const historyList = document.getElementById('shiritoriHistory');
-    historyList.innerHTML = `<li>${shiritoriCurrentWordForDisplay} (スタート)</li>`;
-    document.getElementById('shiritoriMessage').textContent = `${AI_NAME}「しりとり、はじめるぷぷ！」`;
-    const userInputField = document.getElementById('shiritoriUserInput');
-    userInputField.value = '';
-    userInputField.disabled = false;
-    const submitBtn = document.getElementById('shiritoriSubmitBtn');
-    submitBtn.disabled = false;
-    document.getElementById('shiritoriTurnIndicator').textContent = "あなたの番";
+  document.getElementById('shiritoriPrevWord').textContent = shiritoriCurrentWordForDisplay;
+  const historyList = document.getElementById('shiritoriHistory');
+  historyList.innerHTML = `<li>${shiritoriCurrentWordForDisplay} (スタート)</li>`;
+  document.getElementById('shiritoriMessage').textContent =
+    `${AI_NAME}「続けやすい言葉ほど“確率（分布）”が高いイメージだよ。やってみよ！」`;
+  const userInputField = document.getElementById('shiritoriUserInput');
+  userInputField.value = '';
+  userInputField.disabled = false;
+  const submitBtn = document.getElementById('shiritoriSubmitBtn');
+  submitBtn.disabled = false;
+  document.getElementById('shiritoriTurnIndicator').textContent = "あなたの番";
 
-    submitBtn.onclick = handleShiritoriUserSubmit;
-    userInputField.onkeypress = (e) => {
-        if (e.key === 'Enter' && !submitBtn.disabled) {
-            e.preventDefault();
-            handleShiritoriUserSubmit();
-        }
-    };
+  submitBtn.onclick = handleShiritoriUserSubmit;
+  userInputField.onkeypress = (e) => {
+    if (e.key === 'Enter' && !submitBtn.disabled) { e.preventDefault(); handleShiritoriUserSubmit(); }
+  };
 }
 
 function handleShiritoriUserSubmit() {
-    const userInputField = document.getElementById('shiritoriUserInput');
-    const userWordRaw = userInputField.value.trim();
-    const userWordLogic = katakanaToHiragana(userWordRaw.toLowerCase());
+  const userInputField = document.getElementById('shiritoriUserInput');
+  const userWordRaw = userInputField.value.trim();
+  const userWordLogic = katakanaToHiragana(userWordRaw.toLowerCase());
 
-    const messageElem = document.getElementById('shiritoriMessage');
-    const historyList = document.getElementById('shiritoriHistory');
+  const messageElem = document.getElementById('shiritoriMessage');
+  const historyList = document.getElementById('shiritoriHistory');
 
-    if (!userWordRaw) { messageElem.textContent = "言葉を入力してぷぷ！"; return; }
-    if (!/^[ぁ-んァ-ヶー]+$/.test(userWordRaw)) { messageElem.textContent = "ひらがなかカタカナで入力してね！"; return; }
-    if (userWordLogic.slice(-1) === "ん") {
-        endGame("shiritori", `「ん」で終わっちゃったぷぷ！あなたの負けだぷぷ… ${shiritoriChainCount}回続いたよ！`);
-        return;
-    }
-    if (shiritoriUsedWords.has(userWordLogic)) {
-        messageElem.textContent = "その言葉はもう使ったよ！"; return;
-    }
-    if (!isShiritoriMatch(shiritoriCurrentWordForLogic, userWordLogic)) {
-        const requiredChar = getShiritoriLastChar(shiritoriCurrentWordForLogic);
-        messageElem.textContent = `「${requiredChar}」から始まる言葉だよ！ (あなたは「${getShiritoriFirstChar(userWordLogic)}」から始めたみたい)`;
-        return;
-    }
+  if (!userWordRaw) { messageElem.textContent = "言葉を入力してね！"; return; }
+  if (!/^[ぁ-んァ-ヶー]+$/.test(userWordRaw)) { messageElem.textContent = "ひらがなかカタカナで！"; return; }
+  if (userWordLogic.slice(-1) === "ん") {
+    endGame("shiritori", `「ん」で終わり。あなたの負け！でも${shiritoriChainCount}回続いたよ。分布の尾を感じた？`);
+    return;
+  }
+  if (shiritoriUsedWords.has(userWordLogic)) { messageElem.textContent = "その言葉はもう使ったよ！"; return; }
+  if (!isShiritoriMatch(shiritoriCurrentWordForLogic, userWordLogic)) {
+    const requiredChar = getShiritoriLastChar(shiritoriCurrentWordForLogic);
+    messageElem.textContent = `「${requiredChar}」からはじめてみて！`;
+    return;
+  }
 
-    shiritoriCurrentWordForDisplay = userWordRaw;
-    shiritoriCurrentWordForLogic = userWordLogic;
-    shiritoriUsedWords.add(userWordLogic);
-    shiritoriChainCount++;
-    updateVocabularyAndStats(userWordRaw, null, "game_used");
+  shiritoriCurrentWordForDisplay = userWordRaw;
+  shiritoriCurrentWordForLogic = userWordLogic;
+  shiritoriUsedWords.add(userWordLogic);
+  shiritoriChainCount++;
+  updateVocabularyAndStats(userWordRaw, null, "game_used");
+  gainXp(1);
 
-    const li = document.createElement('li');
-    li.textContent = `${userWordRaw} (あなた)`;
-    historyList.prepend(li);
-    document.getElementById('shiritoriPrevWord').textContent = userWordRaw;
-    userInputField.value = '';
-    messageElem.textContent = "いい感じ！次はぷぷの番…";
-    document.getElementById('shiritoriTurnIndicator').textContent = `${AI_NAME}の番 (考え中...)`;
-    userInputField.disabled = true;
-    document.getElementById('shiritoriSubmitBtn').disabled = true;
+  const li = document.createElement('li');
+  li.textContent = `${userWordRaw} (あなた)`;
+  historyList.prepend(li);
+  document.getElementById('shiritoriPrevWord').textContent = userWordRaw;
+  userInputField.value = '';
+  messageElem.textContent = "いいね！次はぷぷの番…";
+  document.getElementById('shiritoriTurnIndicator').textContent = `${AI_NAME}の番 (考え中...)`;
+  userInputField.disabled = true;
+  document.getElementById('shiritoriSubmitBtn').disabled = true;
 
-    setTimeout(aiShiritoriTurn, 1000 + Math.random() * 1500);
+  setTimeout(aiShiritoriTurn, 600 + Math.random() * 1200);
 }
 
 function aiShiritoriTurn() {
-    const lastCharForAIStart = getShiritoriLastChar(shiritoriCurrentWordForLogic);
+  const lastCharForAIStart = getShiritoriLastChar(shiritoriCurrentWordForLogic);
 
-    let aiCandidates = Object.keys(aiState.vocabulary)
-        .map(displayWord => ({ display: displayWord, logic: katakanaToHiragana(displayWord.toLowerCase()) }))
-        .filter(obj =>
-            isShiritoriMatch(lastCharForAIStart, obj.logic) &&
-            obj.logic.slice(-1) !== "ん" &&
-            !shiritoriUsedWords.has(obj.logic) &&
-            obj.logic.length >= 2
-        );
+  let aiCandidates = Object.keys(aiState.vocabulary)
+    .map(displayWord => ({ display: displayWord, logic: katakanaToHiragana(displayWord.toLowerCase()) }))
+    .filter(obj =>
+      isShiritoriMatch(lastCharForAIStart, obj.logic) &&
+      obj.logic.slice(-1) !== "ん" &&
+      !shiritoriUsedWords.has(obj.logic) &&
+      obj.logic.length >= 2
+    );
 
-    let aiWordObj = null;
-    if (aiCandidates.length > 0) {
-        aiWordObj = aiCandidates[Math.floor(Math.random() * aiCandidates.length)];
-    } else {
-        const fallbackWordsByStartChar = {
-            "あ": ["あり", "あめ"], "い": ["いぬ", "いちご"], "う": ["うさぎ", "うみ"], "え": ["えんぴつ", "えだ"], "お": ["おに", "おしろ"],
-            "か": ["かめ", "かばん"], "き": ["きりん", "きっぷ"], "く": ["くま", "くるま"], "け": ["ケーキ", "けむり"], "こ": ["こども", "こっぷ"],
-            "さ": ["さかな", "さいふ"], "し": ["しりとり", "しんぶん"], "す": ["すいか", "すずめ"], "せ": ["せんたく", "せかい"], "そ": ["そら", "ぞう"],
-            "た": ["たこ", "たまご"], "ち": ["チーズ", "ちきゅう"], "つ": ["つくえ", "つみき"], "て": ["テレビ", "てがみ"], "と": ["とまと", "とけい"],
-            "な": ["なす", "なべ"], "に": ["にんじん", "にわ"], "ぬ": ["ぬいぐるみ", "ぬの"], "ね": ["ねこ", "ねぎ"], "の": ["のり", "ノート"],
-            "は": ["バナナ", "はな"], "ひ": ["ひこうき", "ひよこ"], "ふ": ["ふく", "ふね"], "へ": ["ヘビ", "へや"], "ほ": ["ボール", "ほし"],
-            "ま": ["まんま", "マスク"], "み": ["みかん", "みみ"], "む": ["むし", "むら"], "め": ["メガネ", "めだま"], "も": ["もも", "もち"],
-            "や": ["やま", "ゆきだるま"], "ゆ": ["ゆめ", "ゆび"], "よ": ["ヨーグルト", "よる"],
-            "ら": ["ラジオ", "らいおん"], "り": ["りんご", "りす"], "る": ["ルーペ", "るすばん"], "れ": ["レモン", "れんが"], "ろ": ["ロウソク", "ろば"],
-            "わ": ["わに", "わたあめ"], "を": ["おに"],
-            "ん": []
-        };
-        let potentialFallbacks = (fallbackWordsByStartChar[lastCharForAIStart] || [])
-            .map(fw => ({ display: fw, logic: katakanaToHiragana(fw.toLowerCase()) }))
-            .filter(obj => !shiritoriUsedWords.has(obj.logic) && obj.logic.slice(-1) !== 'ん');
+  let aiWordObj = null;
+  if (aiCandidates.length > 0) {
+    aiWordObj = aiCandidates[Math.floor(Math.random() * aiCandidates.length)];
+  } else {
+    const fallbackWordsByStartChar = {
+      "あ": ["あり","あめ"], "い": ["いぬ","いちご"], "う": ["うさぎ","うみ"], "え": ["えんぴつ","えだ"], "お": ["おに","おしろ"],
+      "か": ["かめ","かばん"], "き": ["きりん","きっぷ"], "く": ["くま","くるま"], "け": ["ケーキ","けむり"], "こ": ["こども","こっぷ"],
+      "さ": ["さかな","さいふ"], "し": ["しりとり","しんぶん"], "す": ["すいか","すずめ"], "せ": ["せんたく","せかい"], "そ": ["そら","ぞう"],
+      "た": ["たこ","たまご"], "ち": ["チーズ","ちきゅう"], "つ": ["つくえ","つみき"], "て": ["テレビ","てがみ"], "と": ["とまと","とけい"],
+      "な": ["なす","なべ"], "に": ["にんじん","にわ"], "ぬ": ["ぬいぐるみ","ぬの"], "ね": ["ねこ","ねぎ"], "の": ["のり","ノート"],
+      "は": ["バナナ","はな"], "ひ": ["ひこうき","ひよこ"], "ふ": ["ふく","ふね"], "へ": ["ヘビ","へや"], "ほ": ["ボール","ほし"],
+      "ま": ["まんま","マスク"], "み": ["みかん","みみ"], "む": ["むし","むら"], "め": ["メガネ","めだま"], "も": ["もも","もち"],
+      "や": ["やま","ゆきだるま"], "ゆ": ["ゆめ","ゆび"], "よ": ["ヨーグルト","よる"],
+      "ら": ["ラジオ","らいおん"], "り": ["りんご","りす"], "る": ["ルーペ","るすばん"], "れ": ["レモン","れんが"], "ろ": ["ロウソク","ろば"],
+      "わ": ["わに","わたあめ"], "を": ["おに"], "ん":[]
+    };
+    let potential = (fallbackWordsByStartChar[lastCharForAIStart] || [])
+      .map(fw => ({ display: fw, logic: katakanaToHiragana(fw.toLowerCase()) }))
+      .filter(obj => !shiritoriUsedWords.has(obj.logic) && obj.logic.slice(-1) !== 'ん');
+    if(potential.length>0) aiWordObj = potential[Math.floor(Math.random()*potential.length)];
+  }
 
-        if(potentialFallbacks.length > 0) {
-            aiWordObj = potentialFallbacks[Math.floor(Math.random() * potentialFallbacks.length)];
-        }
+  const messageElem = document.getElementById('shiritoriMessage');
+  const historyList = document.getElementById('shiritoriHistory');
+  const userInputField = document.getElementById('shiritoriUserInput');
+  const submitBtn = document.getElementById('shiritoriSubmitBtn');
+
+  if (aiWordObj) {
+    shiritoriCurrentWordForDisplay = aiWordObj.display;
+    shiritoriCurrentWordForLogic = aiWordObj.logic;
+    shiritoriUsedWords.add(aiWordObj.logic);
+    shiritoriChainCount++;
+    updateVocabularyAndStats(aiWordObj.display, null, "game_used");
+    gainXp(1);
+
+    const li = document.createElement('li');
+    li.textContent = `${aiWordObj.display} (${AI_NAME})`;
+    historyList.prepend(li);
+    document.getElementById('shiritoriPrevWord').textContent = aiWordObj.display;
+    messageElem.textContent = `${AI_NAME}「${aiWordObj.display}！」 分布の“続きやすさ”感じる？ 次どうぞ！`;
+    document.getElementById('shiritoriTurnIndicator').textContent = "あなたの番";
+    userInputField.disabled = false; submitBtn.disabled = false; userInputField.focus();
+
+    if (aiWordObj.logic.slice(-1) === "ん") {
+      endGame("shiritori", `${AI_NAME}が「ん」で終わった！あなたの勝ち！${shiritoriChainCount}回続いたね！`);
     }
+  } else {
+    endGame("shiritori", `${AI_NAME}「うーん、思いつかない…」あなたの勝ち！${shiritoriChainCount}回も続いた！`);
+  }
+}
 
-    const messageElem = document.getElementById('shiritoriMessage');
-    const historyList = document.getElementById('shiritoriHistory');
-    const userInputField = document.getElementById('shiritoriUserInput');
-    const submitBtn = document.getElementById('shiritoriSubmitBtn');
+// --- 共通：ゲーム終了・モーダル ---
+function closeMiniGameModal() {
+  if (gameTimer) clearInterval(gameTimer);
+  gameTimer = null;
+  miniGameModal.style.display = 'none';
+  currentGame = null;
+  if(userInput && !userInput.disabled) userInput.focus();
+  updateDisplay();
+}
 
-    if (aiWordObj) {
-        shiritoriCurrentWordForDisplay = aiWordObj.display;
-        shiritoriCurrentWordForLogic = aiWordObj.logic;
-        shiritoriUsedWords.add(aiWordObj.logic);
-        shiritoriChainCount++;
-        updateVocabularyAndStats(aiWordObj.display, null, "game_used");
+function endGame(gameType, resultMessage) {
+  if (gameTimer) clearInterval(gameTimer);
+  gameTimer = null;
 
-        const li = document.createElement('li');
-        li.textContent = `${aiWordObj.display} (${AI_NAME})`;
-        historyList.prepend(li);
-        document.getElementById('shiritoriPrevWord').textContent = aiWordObj.display;
-        messageElem.textContent = `${AI_NAME}「${aiWordObj.display}！」 さあ、あなたの番！`;
-        document.getElementById('shiritoriTurnIndicator').textContent = "あなたの番";
-        userInputField.disabled = false;
-        submitBtn.disabled = false;
-        userInputField.focus();
+  let loveBonus = 0;
+  let pupuMessage = "";
+  let additionalInfo = "";
 
-        if (aiWordObj.logic.slice(-1) === "ん") {
-            endGame("shiritori", `${AI_NAME}が「ん」で終わっちゃった！あなたの勝ちだぷぷ！${shiritoriChainCount}回続いたね！`);
-        }
+  if (gameType === "wordCollect" || gameType === "tokenize") {
+    // トークナイザー：理解が深まる→愛情とXP
+    loveBonus = Math.max(10, gameScore * 3);
+    gainXp(12);
+    pupuMessage = `トークナイズ理解、いい感じ！ モデルは“かたまり”で読むんだよ。`;
+    additionalInfo = ` (+${loveBonus} 愛情度)`;
+  } else if (gameType === "errand") {
+    // 強化学習ごっこ：成功で固定ボーナス
+    if (resultMessage.includes("成功")) {
+      loveBonus = 60; gainXp(20);
+      pupuMessage = `やった！報酬を集めて汎化に到達！ 強化学習の直感つかめたね！`;
     } else {
-        endGame("shiritori", `${AI_NAME}「うーん、思いつかないぷぷ…」あなたの勝ちだぷぷ！${shiritoriChainCount}回も続いたね！`);
+      loveBonus = 20; gainXp(6);
+      pupuMessage = `惜しい！でも体感できたね。次は壁（損失）をもっと避けてみよう。`;
     }
+    additionalInfo = ` (+${loveBonus} 愛情度)`;
+  } else if (gameType === "shiritori") {
+    if (resultMessage.includes("勝ち") || resultMessage.includes("成功")) {
+      loveBonus = Math.max(10, shiritoriChainCount * 4);
+      gainXp(10);
+      pupuMessage = `分布の“続きやすさ”の感覚、ナイス！`;
+    } else {
+      loveBonus = Math.max(6, shiritoriChainCount * 2);
+      gainXp(6);
+      pupuMessage = `いい勝負！またやろう！`;
+    }
+    additionalInfo = ` (+${loveBonus} 愛情度)`;
+  }
+
+  if(loveBonus > 0) {
+    aiState.love += loveBonus;
+    addMessageToLog(AI_NAME, pupuMessage + additionalInfo, 'system-message');
+  } else {
+    addMessageToLog(AI_NAME, pupuMessage, 'system-message');
+  }
+
+  const messageElem = document.getElementById(`${gameType}Message`);
+  if (messageElem) messageElem.textContent = resultMessage;
+
+  updateDisplay();
+  saveAiState();
 }
 
 // --- 初期化 ---
 function initialize() {
-    // DOM要素取得
-    loveCountElem = document.getElementById('loveCount');
-    chatArea = document.getElementById('chatArea');
-    userInput = document.getElementById('userInput');
-    sendButton = document.getElementById('sendButton');
-    statusButton = document.getElementById('statusButton');
-    resetButton = document.getElementById('resetButton');
-    teachButton = document.getElementById('teachButton');
-    loadingIndicator = document.getElementById('loading');
-    apiSetupSection = document.getElementById('apiSetup');
-    apiKeyInput = document.getElementById('apiKeyInput');
-    phaseIconElem = document.getElementById('phaseIcon');
-    phaseNameElem = document.getElementById('phaseName');
-    vocabCountElem = document.getElementById('vocabCount');
-    responseCountElem = document.getElementById('responseCount');
-    structureLevelElem = document.getElementById('structureLevel');
-    masteredPercentElem = document.getElementById('masteredPercent');
-    progressFillElem = document.getElementById('progressFill');
-    celebrationModal = document.getElementById('celebrationModal');
-    celebrationPhaseIconElem = document.getElementById('celebrationPhaseIcon');
-    celebrationTextElem = document.getElementById('celebrationText');
-    celebrationFeaturesElem = document.getElementById('celebrationFeatures');
-    aiCharacterDisplayArea = document.getElementById('aiCharacterDisplayArea');
-    aiCharacterImage = document.getElementById('aiCharacterImage');
-    aiSpeechBubble = document.getElementById('aiSpeechBubble');
-    aiSpeechText = document.getElementById('aiSpeechText');
-    miniGameModal = document.getElementById('miniGameModal');
-    miniGameTitle = document.getElementById('miniGameTitle');
-    miniGameArea = document.getElementById('miniGameArea');
-    closeMiniGameBtn = document.getElementById('closeMiniGameBtn');
-    showApiSetupBtn = document.getElementById('showApiSetupBtn');
-    saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
-    closeCelebrationBtn = document.getElementById('closeCelebrationBtn');
-    
-    // イベントリスナー
-    sendButton.addEventListener('click', sendMessage);
-    userInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && !sendButton.disabled) {
-            e.preventDefault();
-            sendMessage();
-        }
-    });
-    resetButton.addEventListener('click', resetAI);
-    statusButton.addEventListener('click', showStatus);
-    teachButton.addEventListener('click', teachWord);
-    showApiSetupBtn.addEventListener('click', showApiSetup);
-    saveApiKeyBtn.addEventListener('click', saveApiKey);
-    closeCelebrationBtn.addEventListener('click', closeCelebration);
+  // DOM要素取得
+  loveCountElem = document.getElementById('loveCount');
+  chatArea = document.getElementById('chatArea');
+  userInput = document.getElementById('userInput');
+  sendButton = document.getElementById('sendButton');
+  statusButton = document.getElementById('statusButton');
+  resetButton = document.getElementById('resetButton');
+  teachButton = document.getElementById('teachButton');
+  loadingIndicator = document.getElementById('loading');
+  apiSetupSection = document.getElementById('apiSetup');
+  apiKeyInput = document.getElementById('apiKeyInput');
+  phaseIconElem = document.getElementById('phaseIcon');
+  phaseNameElem = document.getElementById('phaseName');
+  vocabCountElem = document.getElementById('vocabCount');
+  responseCountElem = document.getElementById('responseCount');
+  structureLevelElem = document.getElementById('structureLevel');
+  masteredPercentElem = document.getElementById('masteredPercent');
+  progressFillElem = document.getElementById('progressFill');
+  celebrationModal = document.getElementById('celebrationModal');
+  celebrationPhaseIconElem = document.getElementById('celebrationPhaseIcon');
+  celebrationTextElem = document.getElementById('celebrationText');
+  celebrationFeaturesElem = document.getElementById('celebrationFeatures');
+  aiCharacterDisplayArea = document.getElementById('aiCharacterDisplayArea');
+  aiCharacterImage = document.getElementById('aiCharacterImage');
+  aiSpeechBubble = document.getElementById('aiSpeechBubble');
+  aiSpeechText = document.getElementById('aiSpeechText');
+  miniGameModal = document.getElementById('miniGameModal');
+  miniGameTitle = document.getElementById('miniGameTitle');
+  miniGameArea = document.getElementById('miniGameArea');
+  closeMiniGameBtn = document.getElementById('closeMiniGameBtn');
+  showApiSetupBtn = document.getElementById('showApiSetupBtn');
+  saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
+  closeCelebrationBtn = document.getElementById('closeCelebrationBtn');
 
-    // ミニゲームのイベントリスナー
-    document.getElementById('startGame1Btn').addEventListener('click', startGameWordCollect);
-    document.getElementById('startGame2Btn').addEventListener('click', startGameErrand); // アルゴスケイプ
-    document.getElementById('startGame3Btn').addEventListener('click', startGameShiritori);
-    closeMiniGameBtn.addEventListener('click', closeMiniGameModal);
-    
-    // 初期化処理
-    loadAiState();
-    const apiKeyExists = loadApiKey();
-    chatArea.innerHTML = '';
-    aiState.dialogue_history.forEach(turn => {
-        const speaker = turn.role === "user" ? 'あなた' : AI_NAME;
-        addMessageToLog(speaker, turn.parts[0].text);
-    });
+  // イベントリスナー
+  sendButton.addEventListener('click', sendMessage);
+  userInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !sendButton.disabled) { e.preventDefault(); sendMessage(); }
+  });
+  resetButton.addEventListener('click', resetAI);
+  statusButton.addEventListener('click', showStatus);
+  teachButton.addEventListener('click', teachWord);
+  showApiSetupBtn.addEventListener('click', showApiSetup);
+  saveApiKeyBtn.addEventListener('click', saveApiKey);
+  closeCelebrationBtn.addEventListener('click', closeCelebration);
 
-    if (apiKeyExists && aiState.dialogue_history.length === 0) {
-        addInitialAiGreeting();
-    } else if (!apiKeyExists) {
-        addMessageToLog('システム', 'ようこそ！まずGemini APIキーを設定してください。', 'system-message');
-    }
+  // ミニゲームのイベントリスナー（ボタンIDは既存を流用）
+  document.getElementById('startGame1Btn').addEventListener('click', startGameWordCollect); // tokenize
+  document.getElementById('startGame2Btn').addEventListener('click', startGameErrand); // RLごっこ
+  document.getElementById('startGame3Btn').addEventListener('click', startGameShiritori); // 分布感覚
+  closeMiniGameBtn.addEventListener('click', closeMiniGameModal);
 
-    updateDisplay();
+  // 初期化処理
+  loadAiState();
+  const apiKeyExists = loadApiKey();
+  chatArea.innerHTML = '';
+  aiState.dialogue_history.forEach(turn => {
+    const speaker = turn.role === "user" ? 'あなた' : AI_NAME;
+    addMessageToLog(speaker, turn.parts[0].text);
+  });
+
+  if (apiKeyExists && aiState.dialogue_history.length === 0) addInitialAiGreeting();
+  else if (!apiKeyExists) addMessageToLog('システム', 'ようこそ！まずGemini APIキーを設定してください。', 'system-message');
+
+  updateDisplay();
 }
 
-
 document.addEventListener('DOMContentLoaded', initialize);
-
-
-このプログラムを書き換えて全文を提示して
