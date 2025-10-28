@@ -308,27 +308,28 @@ function checkPhaseTransition() {
   return { changed:false };
 }
 
-// --- Gemini API呼び出し（差し替え版） ---
+// --- Gemini API呼び出し（エラー詳細を集約して可視化） ---
 async function callGeminiAPI(promptContent, isGamePrompt = false) {
   if (!geminiApiKey) throw new Error('APIキーが設定されていません。');
 
-  // フォールバック候補を含むモデル順序
-  const MODEL_CANDIDATES = ["gemini-2.5-flash", "gemini-1.5-flash"];
+  // v1beta + generateContent で安定候補のみ
+  const MODEL_CANDIDATES = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash"
+  ];
 
-  // contents 整形
   const contentsToSend = Array.isArray(promptContent)
     ? promptContent
     : [{ role: "user", parts: [{ text: String(promptContent) }] }];
 
-  // できるだけブロックされにくい最小構成 + 念のための safetySettings
-  const baseBody = {
+  const body = {
     contents: contentsToSend,
     generationConfig: {
       temperature: isGamePrompt ? 0.5 : 0.75,
       maxOutputTokens: isGamePrompt ? 200 : 250,
       responseMimeType: "text/plain"
     },
-    // 必要なければ safetySettings は外してOK
+    // （必要なら）セーフティ設定を明示
     safetySettings: [
       { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
       { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
@@ -338,52 +339,83 @@ async function callGeminiAPI(promptContent, isGamePrompt = false) {
     ]
   };
 
-  // モデルを順に試す（2.5→1.5）
-  let lastErr = null;
+  // 失敗要因を全部集約して最後に見せる
+  const errorStack = [];
+
+  // ヘルパー：候補から安全にテキストを抽出
+  const extractText = (data) => {
+    if (!data?.candidates?.length) return "";
+    let out = "";
+    for (const p of (data.candidates[0].content?.parts ?? [])) {
+      if (typeof p.text === "string") out += p.text;
+    }
+    return out.trim();
+  };
+
   for (const MODEL_NAME of MODEL_CANDIDATES) {
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
     try {
       const res = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(baseBody)
+        body: JSON.stringify(body)
       });
-      const data = await res.json();
 
+      const data = await res.json().catch(() => ({}));
+
+      // HTTP エラー（4xx/5xx）
       if (!res.ok) {
-        const msg = data?.error?.message || "不明なAPIエラー";
-        throw new Error(`API呼び出しエラー: ${res.status} - ${msg}`);
+        errorStack.push({
+          model: MODEL_NAME,
+          httpStatus: res.status,
+          errorMessage: data?.error?.message || "不明なAPIエラー",
+          errorCode: data?.error?.status || null
+        });
+        continue; // 次のモデル候補へ
       }
 
-      // ブロック判定（候補ゼロ）
-      if (!data.candidates || data.candidates.length === 0) {
-        const reason = data?.promptFeedback?.blockReason || "（理由不明）";
-        const ratings = data?.promptFeedback?.safetyRatings?.map(r=>r.category+":"+r.probability).join(", ");
-        throw new Error(`モデル応答がブロックされました: blockReason=${reason}${ratings ? " / safety="+ratings : ""}`);
-      }
+      // レスポンス自体は 200 でも、candidates が空＝ブロック/無回答ケース
+      const text = extractText(data);
+      if (text) return text;
 
-      // 念のため robust にテキスト抽出
-      const first = data.candidates[0];
-      let text = "";
-      if (first?.content?.parts?.length) {
-        for (const p of first.content.parts) {
-          if (typeof p.text === "string") text += p.text;
-          // もし他の型（functionCall等）が来たらここで必要に応じて処理
-        }
-      }
-      if (text && text.trim()) return text.trim();
-
-      // ここまで来て空なら明示エラー
-      throw new Error("候補は存在するがテキストが抽出できませんでした。");
+      // ブロックの詳細を記録して次へ
+      errorStack.push({
+        model: MODEL_NAME,
+        httpStatus: 200,
+        errorMessage: "候補が返らずテキストが抽出できませんでした。",
+        blockReason: data?.promptFeedback?.blockReason || null,
+        safetyRatings: data?.promptFeedback?.safetyRatings || null
+      });
+      continue;
     } catch (e) {
-      lastErr = e;
-      // 次のモデルにフォールバック
+      // ネットワーク例外など
+      errorStack.push({
+        model: MODEL_NAME,
+        httpStatus: null,
+        errorMessage: e?.message || String(e)
+      });
       continue;
     }
   }
-  // すべて失敗
-  throw lastErr || new Error('APIからの応答が空か、予期しない形式です。');
+
+  // ここまで来たら全候補が失敗。集約メッセージを作って throw
+  // そのまま UI に出す用に、読みやすいテキストを生成
+  const lines = ["すべてのモデル呼び出しが失敗しました。Gemini のエラー情報："];
+  for (const err of errorStack) {
+    lines.push(
+      [
+        `- model: ${err.model}`,
+        typeof err.httpStatus === "number" ? `status: ${err.httpStatus}` : `status: (通信例外/不明)`,
+        err.errorCode ? `code: ${err.errorCode}` : null,
+        err.errorMessage ? `message: ${err.errorMessage}` : null,
+        err.blockReason ? `blockReason: ${err.blockReason}` : null,
+        err.safetyRatings ? `safetyRatings: ${JSON.stringify(err.safetyRatings)}` : null
+      ].filter(Boolean).join(" | ")
+    );
+  }
+  throw new Error(lines.join("\n"));
 }
+
 
 
 // --- 会話プロンプト合成（Phase × Traits × Love） ---
@@ -1251,6 +1283,7 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
+
 
 
 
