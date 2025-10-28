@@ -297,30 +297,74 @@ function checkPhaseTransition() {
   return { changed:false };
 }
 
-// --- Gemini API呼び出し ---
+// --- Gemini API呼び出し（堅牢化版） ---
 async function callGeminiAPI(promptContent, isGamePrompt = false) {
   if (!geminiApiKey) throw new Error('APIキーが設定されていません。');
 
-  const MODEL_NAME = "gemini-2.5-flash";
+  const MODEL_NAME = "gemini-2.5-flash"; // 404なら "gemini-1.5-flash-latest" にフォールバックしてもOK
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
 
-  const contentsToSend = Array.isArray(promptContent) ? promptContent : [{ role: "user", parts: [{ text: promptContent }] }];
+  const contentsToSend = Array.isArray(promptContent)
+    ? promptContent
+    : [{ role: "user", parts: [{ text: promptContent }] }];
 
   const requestBody = {
     contents: contentsToSend,
-    generationConfig: { temperature: isGamePrompt ? 0.5 : 0.75, maxOutputTokens: isGamePrompt ? 200 : 250 }
+    // 返答の取り回しを安定させる
+    generationConfig: {
+      temperature: isGamePrompt ? 0.5 : 0.7,
+      maxOutputTokens: isGamePrompt ? 256 : 320,
+      // JSONが必要な時は呼び出し側で responseMimeType を指定して渡してね
+      // responseMimeType: "application/json",
+    }
+    // safetySettings は未指定（デフォルト）。必要ならここで緩めるかけど基本不要
   };
 
-  const response = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(requestBody) });
-  const data = await response.json();
-  if (!response.ok) {
-    const msg = data?.error?.message || "不明なAPIエラー";
-    throw new Error(`API呼び出しエラー: ${response.status} - ${msg}`);
+  let resp, data;
+  try {
+    resp = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+  } catch (netErr) {
+    throw new Error(`ネットワークエラー: ${netErr?.message || netErr}`);
   }
-  const output = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (output) return output;
-  throw new Error('APIからの応答が空か、予期しない形式です。');
+
+  try {
+    data = await resp.json();
+  } catch {
+    throw new Error(`API応答のJSONパースに失敗しました（HTTP ${resp.status}）`);
+  }
+
+  if (!resp.ok) {
+    const msg = data?.error?.message || JSON.stringify(data);
+    throw new Error(`API呼び出しエラー: ${resp.status} - ${msg}`);
+  }
+
+  // セーフティや空返答を丁寧にハンドリング
+  const block = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.safetyRatings?.find?.(r=>r?.blocked)?.category;
+  const finishReason = data?.candidates?.[0]?.finishReason;
+  const parts = data?.candidates?.[0]?.content?.parts;
+
+  // 取りうる出力の取り出しを網羅
+  let outputText = "";
+  if (Array.isArray(parts) && parts.length) {
+    outputText = parts.map(p => (typeof p.text === 'string' ? p.text : '')).join('').trim();
+  }
+  if (!outputText && typeof data?.candidates?.[0]?.text === 'string') {
+    outputText = data.candidates[0].text.trim();
+  }
+
+  if (!outputText) {
+    // なぜ空なのかをUIに見える形で返す
+    const reason = block || finishReason || "no_text";
+    throw new Error(`APIからの応答が空か、予期しない形式です。（reason: ${reason}）`);
+  }
+
+  return outputText;
 }
+
 
 // --- 会話プロンプト合成（Phase × Traits × Love） ---
 function buildConversationInstruction() {
@@ -1191,3 +1235,4 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
+
