@@ -308,33 +308,83 @@ function checkPhaseTransition() {
   return { changed:false };
 }
 
-// --- Gemini API呼び出し ---
+// --- Gemini API呼び出し（差し替え版） ---
 async function callGeminiAPI(promptContent, isGamePrompt = false) {
   if (!geminiApiKey) throw new Error('APIキーが設定されていません。');
 
-  const MODEL_NAME = "gemini-2.5-flash";
-  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
+  // フォールバック候補を含むモデル順序
+  const MODEL_CANDIDATES = ["gemini-2.5-flash", "gemini-1.5-flash"];
 
-  const contentsToSend = Array.isArray(promptContent) ? promptContent : [{ role: "user", parts: [{ text: promptContent }] }];
+  // contents 整形
+  const contentsToSend = Array.isArray(promptContent)
+    ? promptContent
+    : [{ role: "user", parts: [{ text: String(promptContent) }] }];
 
-  const requestBody = {
+  // できるだけブロックされにくい最小構成 + 念のための safetySettings
+  const baseBody = {
     contents: contentsToSend,
     generationConfig: {
       temperature: isGamePrompt ? 0.5 : 0.75,
-      maxOutputTokens: isGamePrompt ? 180 : 220 // 軽量＆安定側
-    }
+      maxOutputTokens: isGamePrompt ? 200 : 250,
+      responseMimeType: "text/plain"
+    },
+    // 必要なければ safetySettings は外してOK
+    safetySettings: [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
+    ]
   };
 
-  const response = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(requestBody) });
-  const data = await response.json();
-  if (!response.ok) {
-    const msg = data?.error?.message || "不明なAPIエラー";
-    throw new Error(`API呼び出しエラー: ${response.status} - ${msg}`);
+  // モデルを順に試す（2.5→1.5）
+  let lastErr = null;
+  for (const MODEL_NAME of MODEL_CANDIDATES) {
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${geminiApiKey}`;
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(baseBody)
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        const msg = data?.error?.message || "不明なAPIエラー";
+        throw new Error(`API呼び出しエラー: ${res.status} - ${msg}`);
+      }
+
+      // ブロック判定（候補ゼロ）
+      if (!data.candidates || data.candidates.length === 0) {
+        const reason = data?.promptFeedback?.blockReason || "（理由不明）";
+        const ratings = data?.promptFeedback?.safetyRatings?.map(r=>r.category+":"+r.probability).join(", ");
+        throw new Error(`モデル応答がブロックされました: blockReason=${reason}${ratings ? " / safety="+ratings : ""}`);
+      }
+
+      // 念のため robust にテキスト抽出
+      const first = data.candidates[0];
+      let text = "";
+      if (first?.content?.parts?.length) {
+        for (const p of first.content.parts) {
+          if (typeof p.text === "string") text += p.text;
+          // もし他の型（functionCall等）が来たらここで必要に応じて処理
+        }
+      }
+      if (text && text.trim()) return text.trim();
+
+      // ここまで来て空なら明示エラー
+      throw new Error("候補は存在するがテキストが抽出できませんでした。");
+    } catch (e) {
+      lastErr = e;
+      // 次のモデルにフォールバック
+      continue;
+    }
   }
-  const output = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (output) return output;
-  throw new Error('APIからの応答が空か、予期しない形式です。');
+  // すべて失敗
+  throw lastErr || new Error('APIからの応答が空か、予期しない形式です。');
 }
+
 
 // --- 会話プロンプト合成（Phase × Traits × Love） ---
 function buildConversationInstruction() {
@@ -1201,5 +1251,6 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
+
 
 
