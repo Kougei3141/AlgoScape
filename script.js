@@ -1,3 +1,6 @@
+了解。修正を反映した**完全版（script.js）**です—そのまま置き換えてください。
+
+```javascript
 // --- グローバル定数 ---
 const AI_NAME = "ぷぷ";
 const STORAGE_KEY_STATE = 'pupuAiState_v3'; // v2→v3: traits/xp/学習可視化を導入
@@ -26,7 +29,6 @@ const MAP_WIDTH_TILES = 15;
 const MAP_HEIGHT_TILES = 10;
 
 // --- フェーズ設定（自然体・相棒トーン） ---
-// ＊詩的なナレーションを排し、どう喋るか/関係性/感情の出し方だけ明示
 const PHASES_CONFIG = {
   "たまごドラゴン": {
     icon: "🥚", next_phase: "孵化寸前ドラゴン", image: "assets/pupu_phase1.png",
@@ -146,6 +148,26 @@ AIらしく説明・分析せず、“一緒にいる感覚”を大事に。
 // --- DOM要素 ---
 let chatArea, userInput, sendButton, statusButton, resetButton, teachButton, loadingIndicator, apiSetupSection, apiKeyInput, phaseIconElem, phaseNameElem, vocabCountElem, responseCountElem, structureLevelElem, masteredPercentElem, progressFillElem, celebrationModal, celebrationPhaseIconElem, celebrationTextElem, celebrationFeaturesElem, aiCharacterDisplayArea, aiCharacterImage, aiSpeechBubble, aiSpeechText, miniGameModal, miniGameTitle, miniGameArea, closeMiniGameBtn, showApiSetupBtn, saveApiKeyBtn, closeCelebrationBtn, loveCountElem;
 
+// --- 追加：履歴圧縮ユーティリティ ---
+function clampText(s, max=300){
+  if(!s) return "";
+  return s.length <= max ? s : s.slice(0, max) + "…";
+}
+function buildCompactHistory(history, maxTurns=8, perMsgLimit=300){
+  const trimmed = history.slice(-maxTurns).map(turn => ({
+    role: turn.role,
+    parts: [{ text: clampText(turn.parts?.[0]?.text ?? "", perMsgLimit) }]
+  }));
+  return trimmed;
+}
+function roughChars(contents){
+  let total = 0;
+  for(const c of contents){
+    for(const p of (c.parts||[])) total += (p.text||"").length;
+  }
+  return total;
+}
+
 // --- 状態管理（traits / xp / memories を追加） ---
 function getDefaultAiState() {
   const firstPhaseName = Object.keys(PHASES_CONFIG)[0];
@@ -208,19 +230,11 @@ function getSimpleWordsFromText(text) {
 function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
 
 function updateTraitsFromUserUtterance(text) {
-  // 極端に簡単なルールベースで、体験に揺らぎを出す
   const delta = { curiosity:0, empathy:0, mischief:0, diligence:0 };
-
-  // 疑問符・教えて意図
   if (/[?？]$/.test(text) || /(なぜ|どうして|なんで|教えて)/.test(text)) delta.curiosity += 3;
-  // 励まし/落ち込み表現
   if (/(疲|しんど|つら|落ち込|むり)/.test(text)) delta.empathy += 4;
-  // チャレンジ/遊び
   if (/(挑戦|チャレンジ|探検|遊|実験|試す)/.test(text)) delta.mischief += 3;
-  // 学び/計画/復習
   if (/(勉強|復習|計画|目標|コツコツ|整理)/.test(text)) delta.diligence += 3;
-
-  // 軽い減衰
   if (/(つまら|やめ|無理)/.test(text)) delta.mischief -= 2;
   if (/(嫌い|やだ|うざ)/.test(text)) delta.empathy -= 2;
 
@@ -242,7 +256,8 @@ function updateVocabularyAndStats(text, speaker, category = "learned") {
   if (speaker === "user" || speaker === "ai_response_analysis" || category.startsWith("game_")) {
     const words = getSimpleWordsFromText(text||"");
     for (const word of words) {
-      if (word.length === 1 && /[\u3040-\u309F]/.test(word) && !"あいうえおんかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわを".includes(word)) continue;
+      if (word.length === 1 && /[\u3040-\u309F]/.test(word) &&
+          !"あいうえおんかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわを".includes(word)) continue;
       if (["は","が","を","に","へ","と","も","の","です","ます","だ","で","だよ","よね"].includes(word)) continue;
 
       if (!aiState.vocabulary[word]) aiState.vocabulary[word] = { count: 0, mastered: false, category };
@@ -257,7 +272,6 @@ function updateVocabularyAndStats(text, speaker, category = "learned") {
     aiState.total_responses += 1;
   }
 
-  // 構文レベル（既存ルール維持）
   let newSL = aiState.structure_level;
   if (aiState.learned_words_count >= 50 && aiState.total_responses >= 10 && newSL < 2) newSL = 2;
   if (aiState.learned_words_count >= 120 && aiState.total_responses >= 25 && newSL < 3) newSL = 3;
@@ -308,7 +322,10 @@ async function callGeminiAPI(promptContent, isGamePrompt = false) {
 
   const requestBody = {
     contents: contentsToSend,
-    generationConfig: { temperature: isGamePrompt ? 0.5 : 0.75, maxOutputTokens: isGamePrompt ? 200 : 250 }
+    generationConfig: {
+      temperature: isGamePrompt ? 0.5 : 0.75,
+      maxOutputTokens: isGamePrompt ? 180 : 220 // 軽量＆安定側
+    }
   };
 
   const response = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(requestBody) });
@@ -326,7 +343,6 @@ async function callGeminiAPI(promptContent, isGamePrompt = false) {
 function buildConversationInstruction() {
   const phase = PHASES_CONFIG[aiState.phase_name];
 
-  // トーン修飾（traits/love）
   const toneHints = [];
   if (aiState.traits.empathy > 20) toneHints.push("相手を気づかう一言を最初にそっと添える");
   if (aiState.traits.curiosity > 30) toneHints.push("質問を1つだけ添えて会話を広げる");
@@ -447,6 +463,7 @@ function addInitialAiGreeting() {
   saveAiState();
 }
 
+// --- ここから：安全・軽量な sendMessage ---
 async function sendMessage() {
   const userText = userInput.value.trim();
   if (!userText || sendButton.disabled) return;
@@ -468,38 +485,47 @@ async function sendMessage() {
   aiSpeechBubble.style.display = 'flex';
 
   // 関係ダイナミクス
-  aiState.love += 1; // 会話で+1
-  updateTraitsFromUserUtterance(userText); // traits更新
-
+  aiState.love += 1;                 // 会話で+1
+  updateTraitsFromUserUtterance(userText);
   updateVocabularyAndStats(userText, "user");
-  gainXp(2); // 会話でXP
+  gainXp(2);                         // 会話でXP
 
   aiState.dialogue_history.push({ role: "user", parts: [{ text: userText }] });
   if (aiState.dialogue_history.length > 20) aiState.dialogue_history.splice(0, 2);
 
-  const currentPhaseConfig = PHASES_CONFIG[aiState.phase_name];
+  // --- プロンプトを軽量/堅牢に ---
   const knownWords = Object.keys(aiState.vocabulary).filter(w => aiState.vocabulary[w].mastered);
-  const vocabSample = knownWords.slice(0, 30).join('、') || "まだ言葉を知らない";
+  const vocabSample = knownWords.slice(0, 10).join('、') || "まだ言葉を知らない"; // 10語まで
 
-  // システムインストラクション合成（Phase × Traits × Love）
   const baseInstruction = buildConversationInstruction();
   const systemInstruction = `${baseInstruction}
 （現在の愛情度:${aiState.love} / 知っている言葉:${aiState.learned_words_count}語 / 構文Lv:${aiState.structure_level}
-サンプル語彙:${vocabSample}）`;
+サンプル語彙:${vocabSample}）`.replace(/\s+/g, " ").trim();
 
-  // Chatモデルに“対話スタイル”を固定する
-  const apiPromptContents = [
+  // 履歴を直近4往復・各300字に圧縮
+  const compactHistory = buildCompactHistory(aiState.dialogue_history, 8, 300);
+
+  // 人工のmodelロールは禁止（了承文などは送らない）
+  let sending = [
     { role: "user", parts: [{ text: systemInstruction }] },
-    { role: "model", parts: [{ text: `了解。「${AI_NAME}」として自然体の相棒トーンで応答します。` }] },
-    ...aiState.dialogue_history
+    ...compactHistory
   ];
 
+  // サイズ過大ならさらに圧縮
+  if (roughChars(sending) > 6000) {
+    const moreCompact = buildCompactHistory(aiState.dialogue_history, 4, 220);
+    sending = [
+      { role: "user", parts: [{ text: clampText(systemInstruction, 600) }] },
+      ...moreCompact
+    ];
+  }
+
   try {
-    const aiResponseText = await callGeminiAPI(apiPromptContents, false);
+    const aiResponseText = await callGeminiAPI(sending, false);
     addMessageToLog(AI_NAME, aiResponseText);
     updateVocabularyAndStats(aiResponseText, "ai_response_analysis");
-    updateVocabularyAndStats(null, "ai");
-    gainXp(1); // 応答でも少し
+    updateVocabularyAndStats(null, "ai");   // 応答カウント
+    gainXp(1);                              // 応答でも少し
     aiState.dialogue_history.push({ role: "model", parts: [{ text: aiResponseText }] });
 
     const phaseChangeResult = checkPhaseTransition();
@@ -627,13 +653,9 @@ function teachWord() {
 // =====================
 
 // --- Game1：トークナイザー研究所（tokenize） ---
-// 既存テンプレIDを流用：wordCollect*
-// ・テーマ→「トークナイザー研究所」
-// ・objectsAreaに候補トークンを並べ、正しい分割をクリックで選ぶ
 let tokenizeData = { sentence: "", correctTokens: [], options: [] };
 
 function simpleTokenizerCandidates(sentence){
-  // ざっくり：ひらがな/カタカナ/漢字/英数の連続を1塊に、さらに2～4文字で分割候補を生成
   const chunks = sentence.match(/[\u3040-\u309F]+|[\u30A0-\u30FF]+|[\u4E00-\u9FEA\u3005-\u3007]+|[a-zA-Z0-9]+|[^\s]/g) || [];
   const candidates = new Set();
   chunks.forEach(ch=>{
@@ -655,7 +677,6 @@ async function generateTokenizeTask() {
     "きょう の てんき は はれ",
     "ドラゴン の ぷぷ は げんき"
   ];
-  // APIキーがあれば1文生成を試す（失敗時はサンプル）
   let sentence = sampleSentences[Math.floor(Math.random()*sampleSentences.length)];
   if (geminiApiKey) {
     try{
@@ -668,9 +689,9 @@ async function generateTokenizeTask() {
       if (line && line.length<=20) sentence = line;
     }catch{}
   }
-  // 「正しい分割」を今回はスペース区切りがあればそれを優先、なければ単純分割
   const base = sentence.replace(/\s+/g,' ').trim();
-  const correctTokens = base.includes(' ') ? base.split(' ') : (base.match(/[\u3040-\u309F]+|[\u30A0-\u30FF]+|[\u4E00-\u9FEA\u3005-\u3007]+|[a-zA-Z0-9]+|[^\s]/g) || []);
+  const correctTokens = base.includes(' ') ? base.split(' ') :
+    (base.match(/[\u3040-\u309F]+|[\u30A0-\u30FF]+|[\u4E00-\u9FEA\u3005-\u3007]+|[a-zA-Z0-9]+|[^\s]/g) || []);
   const options = simpleTokenizerCandidates(base);
   tokenizeData = { sentence: base, correctTokens, options };
 }
@@ -692,13 +713,11 @@ async function startGameWordCollect() {
 
   await generateTokenizeTask();
 
-  // 課題文表示
   const header = document.createElement('div');
   header.style.margin = "6px 0 8px";
   header.innerHTML = `<b>文</b>：${tokenizeData.sentence}<br><small>※正しいかたまりをクリック（最大${tokenizeData.correctTokens.length}個）</small>`;
   objectsArea.parentElement.insertBefore(header, objectsArea);
 
-  // 候補をシャッフルして表示
   let display = [...tokenizeData.options];
   display = display.sort(()=>0.5-Math.random()).slice(0, Math.max(12, tokenizeData.correctTokens.length+6));
   const chosen = new Set();
@@ -709,7 +728,6 @@ async function startGameWordCollect() {
     div.onclick = ()=>{
       if (gameTimeLeft<=0 || div.dataset.clicked) return;
       div.dataset.clicked = true;
-      chosen.add(tok);
       const isHit = tokenizeData.correctTokens.includes(tok);
       if (isHit){ gameScore++; div.style.backgroundColor="#a0e8a0"; div.style.borderColor="#5cb85c"; }
       else { gameScore = Math.max(0, gameScore-1); div.style.backgroundColor="#f8a0a0"; div.style.borderColor="#d9534f"; }
@@ -767,7 +785,6 @@ function initializeErrandMap() {
   mapGrid = Array(MAP_HEIGHT_TILES).fill(null).map(() => Array(MAP_WIDTH_TILES).fill(0));
   playerPos = { x: 0, y: 0 };
 
-  // 壁（＝損失の谷）を少し多めに
   for(let i=0; i < MAP_WIDTH_TILES * MAP_HEIGHT_TILES * 0.15; i++) {
     const rx = Math.floor(Math.random() * MAP_WIDTH_TILES);
     const ry = Math.floor(Math.random() * MAP_HEIGHT_TILES);
@@ -869,7 +886,6 @@ function movePlayerErrand(direction) {
       if (!item.collected && currentTileValue === item.storeId) {
         item.collected = true;
         document.getElementById('errandMessage').textContent = `${item.name}（報酬）をゲット！損失を避けつつ進もう！`;
-        // 報酬＝愛情とXPに還元
         aiState.love += 20; gainXp(10);
         drawErrandMap(); updateErrandObjective();
       }
@@ -883,7 +899,6 @@ function movePlayerErrand(direction) {
 }
 
 // --- Game3：言葉のしりとりチェーン（分布の感覚あそび） ---
-// ルールは互換。メッセージで「分布（続きやすさ）」の感覚へ誘導
 const katakanaToHiragana = (str) => {
   const map = {'ァ':'あ','ィ':'い','ゥ':'う','ェ':'え','ォ':'お','カ':'か','キ':'き','ク':'く','ケ':'け','コ':'こ',
   'サ':'さ','シ':'し','ス':'す','セ':'せ','ソ':'そ','タ':'た','チ':'ち','ツ':'つ','テ':'て','ト':'と',
@@ -1079,13 +1094,11 @@ function endGame(gameType, resultMessage) {
   let additionalInfo = "";
 
   if (gameType === "wordCollect" || gameType === "tokenize") {
-    // トークナイザー：理解が深まる→愛情とXP
     loveBonus = Math.max(10, gameScore * 3);
     gainXp(12);
     pupuMessage = `トークナイズ理解、いい感じ！ モデルは“かたまり”で読むんだよ。`;
     additionalInfo = ` (+${loveBonus} 愛情度)`;
   } else if (gameType === "errand") {
-    // 強化学習ごっこ：成功で固定ボーナス
     if (resultMessage.includes("成功")) {
       loveBonus = 60; gainXp(20);
       pupuMessage = `やった！報酬を集めて汎化に到達！ 強化学習の直感つかめたね！`;
@@ -1191,3 +1204,4 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
+```
