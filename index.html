@@ -10,9 +10,9 @@
 
   <!-- 画像の先読み（任意） -->
   <link rel="preload" as="image" href="assets/logo.png">
-  <link rel="preload" as="image" href="assets/egg.jpg">
-  <link rel="preload" as="image" href="assets/hatchling.jpg">
-  <link rel="preload" as="image" href="assets/coming_soon.png">
+  <link rel="preload" as="image" href="assets/egg.png">
+  <link rel="preload" as="image" href="assets/pupu_phase1.png">
+  <link rel="preload" as="image" href="assets/pupu_phase3.png">
 </head>
 <body>
   <div class="container">
@@ -74,11 +74,6 @@
 
     <!-- キャラクター表示（画像はJSで差し替え） -->
     <section class="ai-character-display" id="aiCharacterDisplayArea" style="display:none;" aria-live="polite">
-      <!-- 画像差し替えポイント：
-           ・たまご：assets/egg.jpg
-           ・孵化〜幼竜：assets/hatchling.jpg
-           ・成長竜が未完成の間：assets/coming_soon.png
-           JSのPHASES_CONFIG.imageがこれらのいずれかを指すようにしてある前提。 -->
       <picture>
         <img id="aiCharacterImage" src="assets/egg.jpg" alt="ぷぷの姿" />
       </picture>
@@ -181,3 +176,4 @@
   </script>
 </body>
 </html>
+
