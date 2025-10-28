@@ -1201,5 +1201,5 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
-```
+
 
