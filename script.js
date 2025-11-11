@@ -736,173 +736,199 @@ function teachWord() {
 
 
 
+// ... (既存のグローバル定数/変数、及び simpleTokenizerCandidates 関数は変更なし)
+
 // --- Game1：トークナイザー研究所（tokenize） ---
-let tokenizeData = { sentence: "", correctTokens: [], options: [] };
+let tokenizeData = { sentence: "", correctTokens: [], options: [] }; // 構造は維持
 
-function simpleTokenizerCandidates(sentence){
-  // 候補の生成ロジックは維持 (プレイヤーが選ぶ選択肢は多様な方がゲームとして成立するため)
-  const chunks = sentence.match(/[\u3040-\u309F]+|[\u30A0-\u30FF]+|[\u4E00-\u9FEA\u3005-\u3007]+|[a-zA-Z0-9]+|[^\s]/g) || [];
-  const candidates = new Set();
-  chunks.forEach(ch=>{
-    if (ch.length <= 4) candidates.add(ch);
-    for(let size=2; size<=4; size++){
-      for(let i=0;i<=ch.length-size;i++){
-        candidates.add(ch.slice(i,i+size));
-      }
-    }
-  });
-  return Array.from(candidates).filter(t=>t.trim().length>0);
-}
+// ... (generateTokenizeTask 関数は変更なし)
 
-async function generateTokenizeTask() {
-  const sampleSentences = [
-    "あしたはゆうえんちにいく", // 空白なしバージョンを追加
-    "りんごとミルクをかう",
-    "AIはことばをまなぶ",
-    "きょうのてんきははれ",
-    "ドラゴンはげんき"
-  ];
-  let sentence = sampleSentences[Math.floor(Math.random()*sampleSentences.length)];
-  let base = sentence.replace(/\s+/g,'').trim(); // まずは空白を取り除く
-  let correctTokens = [];
-
-  if (geminiApiKey) {
-    try{
-      // 📝 修正: APIでサブワード分割を依頼するプロンプトに変更（学習効果のため）
-      const prompt = `以下の日本語の文を、AIモデルがトークン化する際によく見られる「サブワード」分割の形式で区切ってください。区切りには半角スペースのみを使用してください。ひらがなや助詞は、単独のトークンになることが多いです。
-入力: きょうのてんきははれ
-出力: きょう の てんき は はれ
-入力: ${base}
-出力: `;
-      const res = await callGeminiAPI(prompt, true);
-      const tokenizedLine = (res||"").split(/\n/).map(s=>s.trim()).filter(Boolean)[0];
-      
-      if (tokenizedLine && tokenizedLine.includes(' ')) {
-          correctTokens = tokenizedLine.split(' ').filter(t => t.length > 0);
-          base = correctTokens.join(''); // 正しいトークンから空白なしの文を再構築
-      } else {
-         // APIが単文のみを返した場合、その文を使用
-         const line = (res||"").split(/\n/).map(s=>s.trim()).filter(Boolean)[0];
-         if (line && line.length<=20 && !line.includes(' ')) base = line;
-      }
-    }catch{}
-  }
-  
-  // フォールバック（APIが使えない、または失敗した場合）
-  if (correctTokens.length === 0) {
-    // 従来の簡易的な文字種別による区切りを使用
-    correctTokens = base.includes(' ') ? base.split(' ') :
-      (base.match(/[\u3040-\u309F]+|[\u30A0-\u30FF]+|[\u4E00-\u9FEA\u3005-\u3007]+|[a-zA-Z0-9]+|[^\s]/g) || []);
-  }
-
-  const options = simpleTokenizerCandidates(base);
-  tokenizeData = { sentence: base, correctTokens, options };
-}
-
+// 🌟 新しいトークン分割ゲームの開始ロジック
 async function startGameWordCollect() {
   if (currentGame) return;
   currentGame = "tokenize";
   miniGameModal.style.display = 'flex';
   
-  // 修正: タイトルを「サブワード」を意識したものに変更
-  miniGameTitle.textContent = "サブワード解析室（AIの「言葉のかたまり」を見極めろ）";
+  // 修正: タイトルを操作性を強調したものに変更
+  miniGameTitle.textContent = "AIトークン・ブレイク（最小トークン分割ゲーム）"; 
   
-  const template = document.getElementById('wordCollectGameTemplate').content.cloneNode(true);
-  miniGameArea.innerHTML = '';
-  miniGameArea.appendChild(template);
+  // 新しいゲームテンプレートを定義（クリックで分割するUI用）
+  const newTemplate = document.createElement('div');
+  newTemplate.innerHTML = `
+    <div>
+        <div id="tokenizeGameTheme">狙い：AIが文章を「最小単位のトークン」に分割するプロセスを体験しよう</div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 10px; margin-top: 8px;">
+            <div>スコア: <span id="tokenizeScore">0</span></div>
+            <div>残り時間: <span id="tokenizeTimeLeft">40</span>秒</div>
+        </div>
+        <div style="margin-bottom: 10px;">
+            <p><b>文</b>：<span id="tokenizeSentenceDisplay" style="font-size: 1.2em; border-bottom: 2px dashed #999; padding-bottom: 2px;"></span></p>
+            <small>💡 <span id="tokenizeGuideText">区切りたい文字と文字の**間**をクリックして、トークンを区切ろう。</span></small>
+        </div>
 
-  const objectsArea = document.getElementById('wordCollectObjectsArea');
-  
-  // 修正: 狙いのテキストを「サブワード・トークン化」を意識したものに変更
-  document.getElementById('wordCollectTheme').textContent = "狙い：AIモデルが単語をさらに細かく分割する「サブワード・トークン化」を体験しよう";
-  
+        <div id="tokenizeTokensArea" style="margin-bottom: 15px; min-height: 40px;">
+            <!-- 分割されたトークンがここに入る -->
+        </div>
+
+        <div id="tokenizeResultArea" style="border: 1px solid #ddd; padding: 10px; background: #f9f9f9; max-height: 100px; overflow-y: auto;">
+            <p style="margin: 0;"><b>あなたの分割：</b><span id="playerTokensText"></span></p>
+            <p style="margin: 0; color: #5cb85c;"><b>正解の分割：</b><span id="correctTokensText"></span></p>
+        </div>
+
+        <p id="tokenizeMessage" style="margin-top: 15px; font-size: small;"></p>
+    </div>
+  `;
+  miniGameArea.innerHTML = '';
+  miniGameArea.appendChild(newTemplate);
+
+  const objectsArea = document.getElementById('tokenizeTokensArea');
+  const sentenceDisplay = document.getElementById('tokenizeSentenceDisplay');
+  const playerTokensTextElem = document.getElementById('playerTokensText');
+  const correctTokensTextElem = document.getElementById('correctTokensText');
+  const messageElem = document.getElementById('tokenizeMessage');
+
   objectsArea.innerHTML = '';
   gameScore = 0;
   gameTimeLeft = 40;
-  let consecutiveHits = 0; // 🌟 追加: 連続正解カウンター
+  let consecutiveCorrectTokenCount = 0; // 連続して正解のトークンを生成した回数
   
   await generateTokenizeTask();
 
-  const allCorrectTokens = new Set(tokenizeData.correctTokens); // 判定用Set
-  const difficulty = (tokenizeData.correctTokens.length >= 6) ? "難しめ" : (tokenizeData.correctTokens.length >= 4) ? "普通" : "かんたん";
-  
-  const header = document.createElement('div');
-  header.style.margin = "6px 0 8px";
-  
-  // 修正: 難易度表示を追加
-  header.innerHTML = `<b>文</b>：${tokenizeData.sentence}<br><small>難易度: ${difficulty} | 文を構成する「最小かつ効率的なサブワード」をクリック！（${tokenizeData.correctTokens.length}個）</small>`;
-  
-  objectsArea.parentElement.insertBefore(header, objectsArea);
+  const originalSentence = tokenizeData.sentence;
+  const correctTokens = tokenizeData.correctTokens;
+  correctTokensTextElem.textContent = correctTokens.join(" | ");
 
-  // 🌟【選択肢の確実な包含ロジック】: ゲームを成立させるために最重要
-  const correctCount = allCorrectTokens.size;
-  const maxOptions = 12; 
-  
-  let display = [...allCorrectTokens]; // 1. 正解トークンを必ず含める
-  const incorrectCandidates = tokenizeData.options.filter(tok => !allCorrectTokens.has(tok));
-  
-  // 2. 不正解の候補から、残りの枠に入る分だけランダムに選ぶ
-  const neededIncorrect = Math.max(0, maxOptions - correctCount);
-  incorrectCandidates.sort(()=>0.5-Math.random());
-  display.push(...incorrectCandidates.slice(0, neededIncorrect));
-  
-  // 3. 全ての選択肢をシャッフル
-  display = display.sort(()=>0.5-Math.random());
-  
-  const chosen = new Set(); // クリックされた正解トークンを記録
-  display.forEach(tok=>{
-    const div = document.createElement('div');
-    div.className = 'word-object';
-    div.textContent = tok;
-    div.onclick = ()=>{
-      if (gameTimeLeft<=0 || div.dataset.clicked) return;
-      div.dataset.clicked = true;
-      const isHit = allCorrectTokens.has(tok);
-      
-      if (isHit){ 
-        consecutiveHits++; // 🌟 連続正解をカウントアップ
-        let scoreIncrease = 1 + Math.min(consecutiveHits - 1, 3); // 最大ボーナス+3 (1, 2, 3, 4点...)
-        gameScore += scoreIncrease; 
-        div.style.backgroundColor="#a0e8a0"; 
-        div.style.borderColor="#5cb85c"; 
-        chosen.add(tok); 
-        // 連続正解メッセージ表示 (オプション)
-        if(consecutiveHits > 1) document.getElementById('wordCollectMessage').textContent = `連続正解！+${scoreIncrease}点ボーナス！AIの気分がいいよ！`;
-      }
-      else { 
-        consecutiveHits = 0; // 🌟 間違えたらリセット
-        gameScore = Math.max(0, gameScore - 2); // 減点を少し大きく
-        div.style.backgroundColor="#f8a0a0"; 
-        div.style.borderColor="#d9534f"; 
-        document.getElementById('wordCollectMessage').textContent = `${AI_NAME}「惜しい！そのかたまり（トークン）は、AIの辞書にあまりないみたい…。」`;
-      }
-      document.getElementById('wordCollectScore').textContent = gameScore;
-    };
-    objectsArea.appendChild(div);
-  });
+  // プレイヤーが操作する現在の文のセグメントリスト
+  let currentSegments = [originalSentence]; 
 
-  document.getElementById('wordCollectScore').textContent = gameScore;
-  document.getElementById('wordCollectTimeLeft').textContent = gameTimeLeft;
+  // --- UIのレンダリングとイベント設定 ---
+  const renderSegments = () => {
+    objectsArea.innerHTML = '';
+    playerTokensTextElem.textContent = currentSegments.join(" | ");
+
+    // 分割操作をロック
+    if (currentSegments.length >= correctTokens.length + 5) {
+        document.getElementById('tokenizeGuideText').textContent = "💡 分割数が多すぎます！もう分割できません。";
+    }
+
+    currentSegments.forEach((segment, segmentIndex) => {
+        // セグメントを1文字ずつのスパンに分割し、間に区切りクリック要素を挿入
+        const container = document.createElement('span');
+        container.className = 'token-segment';
+        
+        // 最初のトークンセグメントのスタイル
+        const tokenSpan = document.createElement('span');
+        tokenSpan.textContent = segment;
+        tokenSpan.className = 'token-text-area';
+        
+        // 分割済みと仮定して、正誤判定（色付け）
+        if (segment.length > 0) {
+            if (correctTokens.includes(segment)) {
+                tokenSpan.style.backgroundColor = '#d4edda'; // 正解トークン
+                tokenSpan.title = "正解のトークン！";
+            } else if (segment.length === 1 || segmentIndex === 0) {
+                tokenSpan.style.backgroundColor = 'transparent'; // まだ分割途中
+            } else {
+                 tokenSpan.style.backgroundColor = '#f8d7da'; // 不正解（過剰分割/分割不足）
+                 tokenSpan.title = "AIの最小トークンと一致しないようです。";
+            }
+        }
+        
+        container.appendChild(tokenSpan);
+
+        // 各文字の間にクリック可能な「区切り線」を配置
+        for(let i=1; i<segment.length; i++){
+            const breakPoint = document.createElement('span');
+            breakPoint.className = 'break-point';
+            breakPoint.dataset.segmentIndex = segmentIndex;
+            breakPoint.dataset.splitIndex = i; // セグメント内の文字位置
+            breakPoint.textContent = ' '; // 見た目のスペース
+            breakPoint.style.cursor = 'pointer';
+            breakPoint.style.borderRight = '1px dashed #aaa';
+            breakPoint.style.padding = '0 3px';
+            breakPoint.title = 'ここでトークンを分割';
+
+            breakPoint.onclick = (e) => {
+                if (gameTimeLeft <= 0 || currentSegments.length >= correctTokens.length + 5) return;
+                
+                const segIdx = parseInt(e.target.dataset.segmentIndex);
+                const splitIdx = parseInt(e.target.dataset.splitIndex);
+                
+                const targetSegment = currentSegments[segIdx];
+                const newPart1 = targetSegment.slice(0, splitIdx);
+                const newPart2 = targetSegment.slice(splitIdx);
+                
+                // 新しいセグメントリストを作成し、古いものを置き換える
+                currentSegments.splice(segIdx, 1, newPart1, newPart2);
+                
+                // スコアリング
+                if (correctTokens.includes(newPart1) && !chosen.has(newPart1)){
+                    chosen.add(newPart1);
+                    consecutiveCorrectTokenCount++;
+                    let scoreIncrease = 5 + Math.min(consecutiveCorrectTokenCount - 1, 3);
+                    gameScore += scoreIncrease;
+                    messageElem.textContent = `トークン「${newPart1}」が正解！AIの学習効率が上がったよ！ (+${scoreIncrease})`;
+                } else if (correctTokens.includes(newPart2) && !chosen.has(newPart2)){
+                     // 後ろのトークンが正解だった場合もスコア加算（ただし連続ボーナスはリセットしない）
+                    chosen.add(newPart2);
+                    gameScore += 5;
+                    messageElem.textContent = `トークン「${newPart2}」が正解！ (+5)`;
+                    consecutiveCorrectTokenCount = 0; // 一旦リセット（分割操作の連続性がないため）
+                }
+                else {
+                    gameScore = Math.max(0, gameScore - 2);
+                    consecutiveCorrectTokenCount = 0;
+                    messageElem.textContent = `${AI_NAME}「うーん、その分割は少し非効率かも... (-2)」`;
+                }
+
+                document.getElementById('tokenizeScore').textContent = gameScore;
+                renderSegments(); // 再描画
+            };
+            container.appendChild(breakPoint);
+        }
+
+        objectsArea.appendChild(container);
+    });
+  };
+
+  sentenceDisplay.textContent = originalSentence; // 初期表示は分割なし
+  renderSegments();
+
+  document.getElementById('tokenizeScore').textContent = gameScore;
+  document.getElementById('tokenizeTimeLeft').textContent = gameTimeLeft;
   
-  // 修正: AIメッセージを「サブワード」と「理解度」に焦点を当てたものに変更
-  document.getElementById('wordCollectMessage').textContent =
-    `${AI_NAME}「AIは長い単語や珍しい単語を、より短い『サブワード』に分解するんだ。正しいサブワードで文を構成できると、AIの理解度は一気に上がるよ！」`;
+  messageElem.textContent =
+    `${AI_NAME}「AIは長い言葉を効率のいいかたまり（トークン）に分けるよ。正しく区切ろう！」`;
+
+  const chosen = new Set(); // 既に正解と判定されたトークンを保持
 
   gameTimer = setInterval(()=>{
     gameTimeLeft--;
-    document.getElementById('wordCollectTimeLeft').textContent = gameTimeLeft;
+    document.getElementById('tokenizeTimeLeft').textContent = gameTimeLeft;
     if (gameTimeLeft<=0){
-      clearInterval(gameTimer); // タイマーを停止
-      const total = tokenizeData.correctTokens.length;
-      const hits = [...objectsArea.children].filter(c=>c.dataset.clicked && allCorrectTokens.has(c.textContent)).length;
-      
-      // 修正: 終了メッセージを「サブワード」の仕組みを解説するものに変更
-      const msg = `タイムアップ！正解 ${hits}/${total}。\nこれが「サブワード・トークン化」の仕組みだよ。AIは単語全体でなく、このサブワードの組み合わせで言葉を理解しているんだ！`;
-      endGame("wordCollect", msg); // 互換（ID流用）
+        clearInterval(gameTimer);
+        // 最終評価
+        const finalSegments = currentSegments.filter(s => s.length > 0);
+        let finalCorrectCount = 0;
+        let finalScore = gameScore;
+
+        // 厳密な分割一致判定
+        if (finalSegments.length === correctTokens.length && finalSegments.every((seg, idx) => seg === correctTokens[idx])) {
+             finalScore += 50;
+             finalCorrectCount = correctTokens.length;
+             messageElem.textContent = `**完璧！** 分割がAIの学習パターンと完全に一致しました！(+50ボーナス)`;
+        } else {
+             // 個別のトークン一致を数える
+             finalSegments.forEach(seg => { if(correctTokens.includes(seg)) finalCorrectCount++; });
+             messageElem.textContent = `タイムアップ！頑張ったね。`;
+        }
+
+        // 🌟 終了メッセージを「分割」の仕組みを解説するものに変更
+        const msg = `最終スコア: ${finalScore}点。最終分割一致数: ${finalCorrectCount} / ${correctTokens.length}。\nAIは文章を、頻繁に使われる「サブワード」に分割して学習するよ。分割のやり方一つで、AIの理解度が大きく変わるんだ！`;
+        endGame("tokenize", msg);
     }
   },1000);
 }
-
 
 
 
@@ -1360,6 +1386,7 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
+
 
 
 
