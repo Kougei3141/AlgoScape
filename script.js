@@ -735,6 +735,7 @@ function teachWord() {
 let tokenizeData = { sentence: "", correctTokens: [], options: [] };
 
 function simpleTokenizerCandidates(sentence){
+  // 候補の生成ロジックは維持 (プレイヤーが選ぶ選択肢は多様な方がゲームとして成立するため)
   const chunks = sentence.match(/[\u3040-\u309F]+|[\u30A0-\u30FF]+|[\u4E00-\u9FEA\u3005-\u3007]+|[a-zA-Z0-9]+|[^\s]/g) || [];
   const candidates = new Set();
   chunks.forEach(ch=>{
@@ -757,20 +758,38 @@ async function generateTokenizeTask() {
     "ドラゴン の ぷぷ は げんき"
   ];
   let sentence = sampleSentences[Math.floor(Math.random()*sampleSentences.length)];
+  let base = sentence.replace(/\s+/g,' ').trim(); // まずは空白を取り除く
+  let correctTokens = [];
+
   if (geminiApiKey) {
     try{
-      const prompt = `以下の条件で1文だけ返してください。
-- 日本語の簡単な短文（子供でも読める）
-- ひらがな中心、名詞や助詞が混ざる
-- 出力は文のみ。余計な語は不要。`;
+      // 📝 修正: APIでサブワード分割を依頼するプロンプトに変更
+      const prompt = `以下の日本語の文を、AIモデルがトークン化する際によく見られる「サブワード」分割の形式で区切ってください。区切りには半角スペースのみを使用してください。ひらがなや助詞は、単独のトークンになることが多いです。
+入力: きょうのてんきははれ
+出力: きょう の てんき は はれ
+入力: ${base}
+出力: `;
       const res = await callGeminiAPI(prompt, true);
-      const line = (res||"").split(/\n/).map(s=>s.trim()).filter(Boolean)[0];
-      if (line && line.length<=20) sentence = line;
+      const tokenizedLine = (res||"").split(/\n/).map(s=>s.trim()).filter(Boolean)[0];
+      
+      if (tokenizedLine && tokenizedLine.includes(' ')) {
+          correctTokens = tokenizedLine.split(' ').filter(t => t.length > 0);
+          base = correctTokens.join(''); // 正しいトークンから空白なしの文を再構築
+      } else {
+         // APIが単文のみを返した場合、その文を使用
+         const line = (res||"").split(/\n/).map(s=>s.trim()).filter(Boolean)[0];
+         if (line && line.length<=20 && !line.includes(' ')) base = line;
+      }
     }catch{}
   }
-  const base = sentence.replace(/\s+/g,' ').trim();
-  const correctTokens = base.includes(' ') ? base.split(' ') :
-    (base.match(/[\u3040-\u309F]+|[\u30A0-\u30FF]+|[\u4E00-\u9FEA\u3005-\u3007]+|[a-zA-Z0-9]+|[^\s]/g) || []);
+  
+  // フォールバック（APIが使えない、または失敗した場合）
+  if (correctTokens.length === 0) {
+    // 従来の簡易的な文字種別による区切りを使用
+    correctTokens = base.includes(' ') ? base.split(' ') :
+      (base.match(/[\u3040-\u309F]+|[\u30A0-\u30FF]+|[\u4E00-\u9FEA\u3005-\u3007]+|[a-zA-Z0-9]+|[^\s]/g) || []);
+  }
+
   const options = simpleTokenizerCandidates(base);
   tokenizeData = { sentence: base, correctTokens, options };
 }
@@ -779,13 +798,19 @@ async function startGameWordCollect() {
   if (currentGame) return;
   currentGame = "tokenize";
   miniGameModal.style.display = 'flex';
-  miniGameTitle.textContent = "トークナイザー研究所（ことばを区切ってみよう）";
+  
+  // 📝 修正: タイトルを「サブワード」を意識したものに変更
+  miniGameTitle.textContent = "サブワード解析室（AIの「言葉のかたまり」を見極めろ）";
+  
   const template = document.getElementById('wordCollectGameTemplate').content.cloneNode(true);
   miniGameArea.innerHTML = '';
   miniGameArea.appendChild(template);
 
   const objectsArea = document.getElementById('wordCollectObjectsArea');
-  document.getElementById('wordCollectTheme').textContent = "狙い：モデルが読む“かたまり（トークン）”を理解しよう";
+  
+  // 📝 修正: 狙いのテキストを「サブワード・トークン化」を意識したものに変更
+  document.getElementById('wordCollectTheme').textContent = "狙い：AIモデルが単語をさらに細かく分割する「サブワード・トークン化」を体験しよう";
+  
   objectsArea.innerHTML = '';
   gameScore = 0;
   gameTimeLeft = 40;
@@ -794,7 +819,10 @@ async function startGameWordCollect() {
 
   const header = document.createElement('div');
   header.style.margin = "6px 0 8px";
-  header.innerHTML = `<b>文</b>：${tokenizeData.sentence}<br><small>※正しいかたまりをクリック（最大${tokenizeData.correctTokens.length}個）</small>`;
+  
+  // 📝 修正: 説明文を「サブワード」に焦点を当てたものに変更
+  header.innerHTML = `<b>文</b>：${tokenizeData.sentence}<br><small>※文全体を構成する「最小かつ効率的なサブワード」をクリック！（${tokenizeData.correctTokens.length}個）</small>`;
+  
   objectsArea.parentElement.insertBefore(header, objectsArea);
 
   let display = [...tokenizeData.options];
@@ -808,8 +836,17 @@ async function startGameWordCollect() {
       if (gameTimeLeft<=0 || div.dataset.clicked) return;
       div.dataset.clicked = true;
       const isHit = tokenizeData.correctTokens.includes(tok);
-      if (isHit){ gameScore++; div.style.backgroundColor="#a0e8a0"; div.style.borderColor="#5cb85c"; }
-      else { gameScore = Math.max(0, gameScore-1); div.style.backgroundColor="#f8a0a0"; div.style.borderColor="#d9534f"; }
+      if (isHit){ 
+        gameScore++; 
+        div.style.backgroundColor="#a0e8a0"; 
+        div.style.borderColor="#5cb85c"; 
+        chosen.add(tok); // 正解トークンを記録
+      }
+      else { 
+        gameScore = Math.max(0, gameScore-1); 
+        div.style.backgroundColor="#f8a0a0"; 
+        div.style.borderColor="#d9534f"; 
+      }
       document.getElementById('wordCollectScore').textContent = gameScore;
     };
     objectsArea.appendChild(div);
@@ -817,21 +854,25 @@ async function startGameWordCollect() {
 
   document.getElementById('wordCollectScore').textContent = gameScore;
   document.getElementById('wordCollectTimeLeft').textContent = gameTimeLeft;
+  
+  // 📝 修正: AIメッセージを「サブワード」と「理解度」に焦点を当てたものに変更
   document.getElementById('wordCollectMessage').textContent =
-    `${AI_NAME}「トークン（かたまり）を当てよう！正解ほどモデルは読みやすいよ！」`;
+    `${AI_NAME}「AIは長い単語や珍しい単語を、より短い『サブワード』に分解するんだ。正しいサブワードで文を構成できると、AIの理解度は一気に上がるよ！」`;
 
   gameTimer = setInterval(()=>{
     gameTimeLeft--;
     document.getElementById('wordCollectTimeLeft').textContent = gameTimeLeft;
     if (gameTimeLeft<=0){
       const total = tokenizeData.correctTokens.length;
-      const hit = tokenizeData.correctTokens.filter(t=>[...chosen].includes(t)).length;
-      const msg = `結果：正解 ${hit}/${total}。モデルは“かたまり”で読むから、上手に切れると理解しやすいよ！`;
+      // 終了判定ロジックを修正: chosenセットは各クリックで使われているので、ここでは使わない
+      const hits = [...objectsArea.children].filter(c=>c.dataset.clicked && tokenizeData.correctTokens.includes(c.textContent)).length;
+      
+      // 📝 修正: 終了メッセージを「サブワード」の仕組みを解説するものに変更
+      const msg = `結果：正解 ${hits}/${total}。これが「サブワード・トークン化」の仕組みだよ。AIは単語全体でなく、このサブワードの組み合わせで言葉を理解しているんだ！`;
       endGame("wordCollect", msg); // 互換（ID流用）
     }
   },1000);
 }
-
 // --- Game2：アルゴスケイプ（強化学習の雰囲気を体験） ---
 function startGameErrand() {
   if (currentGame) return;
@@ -1283,6 +1324,7 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
+
 
 
 
