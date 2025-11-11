@@ -731,6 +731,11 @@ function teachWord() {
 // ミニゲーム（AIを学べる表現に改修）
 // =====================
 
+
+
+
+
+
 // --- Game1：トークナイザー研究所（tokenize） ---
 let tokenizeData = { sentence: "", correctTokens: [], options: [] };
 
@@ -751,19 +756,19 @@ function simpleTokenizerCandidates(sentence){
 
 async function generateTokenizeTask() {
   const sampleSentences = [
-    "あした は ゆうえんち に いく",
-    "りんご と ミルク を かう",
-    "AI は ことば を 学ぶ",
-    "きょう の てんき は はれ",
-    "ドラゴン の ぷぷ は げんき"
+    "あしたはゆうえんちにいく", // 空白なしバージョンを追加
+    "りんごとミルクをかう",
+    "AIはことばをまなぶ",
+    "きょうのてんきははれ",
+    "ドラゴンはげんき"
   ];
   let sentence = sampleSentences[Math.floor(Math.random()*sampleSentences.length)];
-  let base = sentence.replace(/\s+/g,' ').trim(); // まずは空白を取り除く
+  let base = sentence.replace(/\s+/g,'').trim(); // まずは空白を取り除く
   let correctTokens = [];
 
   if (geminiApiKey) {
     try{
-      // 📝 修正: APIでサブワード分割を依頼するプロンプトに変更
+      // 📝 修正: APIでサブワード分割を依頼するプロンプトに変更（学習効果のため）
       const prompt = `以下の日本語の文を、AIモデルがトークン化する際によく見られる「サブワード」分割の形式で区切ってください。区切りには半角スペースのみを使用してください。ひらがなや助詞は、単独のトークンになることが多いです。
 入力: きょうのてんきははれ
 出力: きょう の てんき は はれ
@@ -799,7 +804,7 @@ async function startGameWordCollect() {
   currentGame = "tokenize";
   miniGameModal.style.display = 'flex';
   
-  // 📝 修正: タイトルを「サブワード」を意識したものに変更
+  // 修正: タイトルを「サブワード」を意識したものに変更
   miniGameTitle.textContent = "サブワード解析室（AIの「言葉のかたまり」を見極めろ）";
   
   const template = document.getElementById('wordCollectGameTemplate').content.cloneNode(true);
@@ -808,26 +813,43 @@ async function startGameWordCollect() {
 
   const objectsArea = document.getElementById('wordCollectObjectsArea');
   
-  // 📝 修正: 狙いのテキストを「サブワード・トークン化」を意識したものに変更
+  // 修正: 狙いのテキストを「サブワード・トークン化」を意識したものに変更
   document.getElementById('wordCollectTheme').textContent = "狙い：AIモデルが単語をさらに細かく分割する「サブワード・トークン化」を体験しよう";
   
   objectsArea.innerHTML = '';
   gameScore = 0;
   gameTimeLeft = 40;
-
+  let consecutiveHits = 0; // 🌟 追加: 連続正解カウンター
+  
   await generateTokenizeTask();
 
+  const allCorrectTokens = new Set(tokenizeData.correctTokens); // 判定用Set
+  const difficulty = (tokenizeData.correctTokens.length >= 6) ? "難しめ" : (tokenizeData.correctTokens.length >= 4) ? "普通" : "かんたん";
+  
   const header = document.createElement('div');
   header.style.margin = "6px 0 8px";
   
-  // 📝 修正: 説明文を「サブワード」に焦点を当てたものに変更
-  header.innerHTML = `<b>文</b>：${tokenizeData.sentence}<br><small>※文全体を構成する「最小かつ効率的なサブワード」をクリック！（${tokenizeData.correctTokens.length}個）</small>`;
+  // 修正: 難易度表示を追加
+  header.innerHTML = `<b>文</b>：${tokenizeData.sentence}<br><small>難易度: ${difficulty} | 文を構成する「最小かつ効率的なサブワード」をクリック！（${tokenizeData.correctTokens.length}個）</small>`;
   
   objectsArea.parentElement.insertBefore(header, objectsArea);
 
-  let display = [...tokenizeData.options];
-  display = display.sort(()=>0.5-Math.random()).slice(0, Math.max(12, tokenizeData.correctTokens.length+6));
-  const chosen = new Set();
+  // 🌟【選択肢の確実な包含ロジック】: ゲームを成立させるために最重要
+  const correctCount = allCorrectTokens.size;
+  const maxOptions = 12; 
+  
+  let display = [...allCorrectTokens]; // 1. 正解トークンを必ず含める
+  const incorrectCandidates = tokenizeData.options.filter(tok => !allCorrectTokens.has(tok));
+  
+  // 2. 不正解の候補から、残りの枠に入る分だけランダムに選ぶ
+  const neededIncorrect = Math.max(0, maxOptions - correctCount);
+  incorrectCandidates.sort(()=>0.5-Math.random());
+  display.push(...incorrectCandidates.slice(0, neededIncorrect));
+  
+  // 3. 全ての選択肢をシャッフル
+  display = display.sort(()=>0.5-Math.random());
+  
+  const chosen = new Set(); // クリックされた正解トークンを記録
   display.forEach(tok=>{
     const div = document.createElement('div');
     div.className = 'word-object';
@@ -835,17 +857,24 @@ async function startGameWordCollect() {
     div.onclick = ()=>{
       if (gameTimeLeft<=0 || div.dataset.clicked) return;
       div.dataset.clicked = true;
-      const isHit = tokenizeData.correctTokens.includes(tok);
+      const isHit = allCorrectTokens.has(tok);
+      
       if (isHit){ 
-        gameScore++; 
+        consecutiveHits++; // 🌟 連続正解をカウントアップ
+        let scoreIncrease = 1 + Math.min(consecutiveHits - 1, 3); // 最大ボーナス+3 (1, 2, 3, 4点...)
+        gameScore += scoreIncrease; 
         div.style.backgroundColor="#a0e8a0"; 
         div.style.borderColor="#5cb85c"; 
-        chosen.add(tok); // 正解トークンを記録
+        chosen.add(tok); 
+        // 連続正解メッセージ表示 (オプション)
+        if(consecutiveHits > 1) document.getElementById('wordCollectMessage').textContent = `連続正解！+${scoreIncrease}点ボーナス！AIの気分がいいよ！`;
       }
       else { 
-        gameScore = Math.max(0, gameScore-1); 
+        consecutiveHits = 0; // 🌟 間違えたらリセット
+        gameScore = Math.max(0, gameScore - 2); // 減点を少し大きく
         div.style.backgroundColor="#f8a0a0"; 
         div.style.borderColor="#d9534f"; 
+        document.getElementById('wordCollectMessage').textContent = `${AI_NAME}「惜しい！そのかたまり（トークン）は、AIの辞書にあまりないみたい…。」`;
       }
       document.getElementById('wordCollectScore').textContent = gameScore;
     };
@@ -855,7 +884,7 @@ async function startGameWordCollect() {
   document.getElementById('wordCollectScore').textContent = gameScore;
   document.getElementById('wordCollectTimeLeft').textContent = gameTimeLeft;
   
-  // 📝 修正: AIメッセージを「サブワード」と「理解度」に焦点を当てたものに変更
+  // 修正: AIメッセージを「サブワード」と「理解度」に焦点を当てたものに変更
   document.getElementById('wordCollectMessage').textContent =
     `${AI_NAME}「AIは長い単語や珍しい単語を、より短い『サブワード』に分解するんだ。正しいサブワードで文を構成できると、AIの理解度は一気に上がるよ！」`;
 
@@ -863,16 +892,23 @@ async function startGameWordCollect() {
     gameTimeLeft--;
     document.getElementById('wordCollectTimeLeft').textContent = gameTimeLeft;
     if (gameTimeLeft<=0){
+      clearInterval(gameTimer); // タイマーを停止
       const total = tokenizeData.correctTokens.length;
-      // 終了判定ロジックを修正: chosenセットは各クリックで使われているので、ここでは使わない
-      const hits = [...objectsArea.children].filter(c=>c.dataset.clicked && tokenizeData.correctTokens.includes(c.textContent)).length;
+      const hits = [...objectsArea.children].filter(c=>c.dataset.clicked && allCorrectTokens.has(c.textContent)).length;
       
-      // 📝 修正: 終了メッセージを「サブワード」の仕組みを解説するものに変更
-      const msg = `結果：正解 ${hits}/${total}。これが「サブワード・トークン化」の仕組みだよ。AIは単語全体でなく、このサブワードの組み合わせで言葉を理解しているんだ！`;
+      // 修正: 終了メッセージを「サブワード」の仕組みを解説するものに変更
+      const msg = `タイムアップ！正解 ${hits}/${total}。\nこれが「サブワード・トークン化」の仕組みだよ。AIは単語全体でなく、このサブワードの組み合わせで言葉を理解しているんだ！`;
       endGame("wordCollect", msg); // 互換（ID流用）
     }
   },1000);
 }
+
+
+
+
+
+
+
 // --- Game2：アルゴスケイプ（強化学習の雰囲気を体験） ---
 function startGameErrand() {
   if (currentGame) return;
@@ -1324,6 +1360,7 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
+
 
 
 
