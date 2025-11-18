@@ -1438,7 +1438,7 @@ async function startNew連想Round(topicWord) {
 
     messageElem.textContent = `${AI_NAME}が「${topicWord}」から連想する言葉を考え中...`;
 
-    const prompt = `以下の単語から連想される単語を${连想候補数}つ、簡潔に返してください。単語は半角スペースで区切ってください。句読点や余計な語は含めないでください。
+    const prompt = `以下の単語から連想される単語を${连想候補数}つ、簡潔に返してください。単語は半角スペースで区切ってください。句読点や余計な語は含めないでください。ただし出力は同じ入力語でも毎回新しい${连想候補数}つを考えてください。
 入力: りんご
 出力: あか おいしい フルーツ あまい くだもの
 入力: ${topicWord}
@@ -1500,7 +1500,7 @@ function handle連想Guess(guessedWord, score, isHighProbability, allCandidates)
         reward = baseScore;
         gameScore += reward;
         shiritoriChainCount = 0; 
-        messageElem.textContent = `⭕ 正解！これはぷぷにとって低確率な連想だったみたい。連鎖リセット... (+${reward}点)`;
+        messageElem.textContent = `不正解！これはぷぷにとって低確率な連想だったみたい。連鎖リセット... (+${reward}点)`;
     }
     
     document.getElementById('shiritoriChainCount').textContent = shiritoriChainCount;
@@ -1659,4 +1659,5 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
+
 
