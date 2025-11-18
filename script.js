@@ -3,7 +3,7 @@ const AI_NAME = "ぷぷ";
 const STORAGE_KEY_STATE = 'pupuAiState_v3'; 
 const STORAGE_KEY_API_KEY = 'pupuGeminiApiKey_v1';
 const GAME_NAME_ERRAND = "アルゴスケイプ（強化学習ごっこ）"; 
-
+// AIzaSyBR_OxokA_perJGf1Aa_2onNfMuoOCWRrk
 // --- グローバル変数 ---
 let geminiApiKey = '';
 let aiState = {}; 
@@ -1659,3 +1659,4 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
+
