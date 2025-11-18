@@ -3,7 +3,7 @@ const AI_NAME = "ぷぷ";
 const STORAGE_KEY_STATE = 'pupuAiState_v3'; 
 const STORAGE_KEY_API_KEY = 'pupuGeminiApiKey_v1';
 const GAME_NAME_ERRAND = "アルゴスケイプ（強化学習ごっこ）"; 
-// AIzaSyBR_OxokA_perJGf1Aa_2onNfMuoOCWRrk
+
 // --- グローバル変数 ---
 let geminiApiKey = '';
 let aiState = {}; 
@@ -37,7 +37,8 @@ let allCorrectTokens = new Set();
 let consecutiveHits = 0; 
 
 // Game3 (連想ゲーム) 用
-const 连想候補数 = 5;
+const 連想候補数 = 5;
+let shiritoriUsedWords = new Set(); 
 
 // --- フェーズ設定（自然体・相棒トーン） ---
 const PHASES_CONFIG = {
@@ -161,20 +162,17 @@ let loveCountElem, chatArea, userInput, sendButton, statusButton, resetButton, t
 
 // --- 仮のDOM要素とテンプレート定義 ---
 const setupDummyDOM = () => {
-    // 既存IDの要素があればそれを使い、なければ生成する
     const createElement = (id, tag = 'div', style = {}) => {
         let el = document.getElementById(id);
         if (el) return el;
         el = document.createElement(tag);
         el.id = id;
         Object.assign(el.style, style);
-        // 仮のクラス名/プロパティ設定
         if(id === 'celebrationModal') el.classList.add('modal');
         if(id === 'apiSetup') el.classList.add('setup-section');
         return el;
     };
     
-    // 基本要素
     loveCountElem = createElement('loveCount', 'span');
     chatArea = createElement('chatArea');
     userInput = createElement('userInput', 'input');
@@ -204,13 +202,12 @@ const setupDummyDOM = () => {
     saveApiKeyBtn = createElement('saveApiKeyBtn', 'button');
     closeCelebrationBtn = createElement('closeCelebrationBtn', 'button');
     
-    // celebrationModal の構造をシミュレート
     celebrationModal = createElement('celebrationModal', 'div', {display: 'none', position: 'fixed', top: '0'});
     const modalContent = createElement('celebrationContent', 'div');
     const contentBody = createElement('celebrationContentBody', 'div', {className: 'content-body', padding: '15px'});
     celebrationPhaseIconElem = createElement('celebrationPhaseIcon', 'span', {fontSize: '2em'});
     celebrationTextElem = createElement('celebrationText', 'p');
-    celebrationFeaturesElem = contentBody; // featuresAreaとしてbody自体を使用
+    celebrationFeaturesElem = contentBody;
     
     modalContent.appendChild(celebrationPhaseIconElem);
     modalContent.appendChild(celebrationTextElem);
@@ -218,7 +215,6 @@ const setupDummyDOM = () => {
     modalContent.appendChild(closeCelebrationBtn);
     celebrationModal.appendChild(modalContent);
 
-    // イベントボタンのダミー
     createElement('startGame1Btn', 'button');
     createElement('startGame2Btn', 'button');
     createElement('startGame3Btn', 'button');
@@ -528,12 +524,12 @@ ${phase.prompt_template}
 
 // --- UI更新 ---
 function updateDisplay() {
-  loveCountElem.textContent = aiState.love;
-  phaseIconElem.textContent = aiState.phase_icon;
-  phaseNameElem.textContent = aiState.phase_name;
-  vocabCountElem.textContent = aiState.learned_words_count;
-  responseCountElem.textContent = aiState.total_responses;
-  structureLevelElem.textContent = aiState.structure_level;
+  if(loveCountElem) loveCountElem.textContent = aiState.love;
+  if(phaseIconElem) phaseIconElem.textContent = aiState.phase_icon;
+  if(phaseNameElem) phaseNameElem.textContent = aiState.phase_name;
+  if(vocabCountElem) vocabCountElem.textContent = aiState.learned_words_count;
+  if(responseCountElem) responseCountElem.textContent = aiState.total_responses;
+  if(structureLevelElem) structureLevelElem.textContent = aiState.structure_level;
 
   const currentPhaseConfig = PHASES_CONFIG[aiState.phase_name];
   if (aiCharacterImage) {
@@ -545,7 +541,7 @@ function updateDisplay() {
 
   const masteredCount = Object.values(aiState.vocabulary).filter(v => v.mastered).length;
   const percent = aiState.learned_words_count > 0 ? Math.round((masteredCount / aiState.learned_words_count) * 100) : 0;
-  masteredPercentElem.textContent = `${percent}%`;
+  if(masteredPercentElem) masteredPercentElem.textContent = `${percent}%`;
 
   let progressPercent = 0;
   if (currentPhaseConfig?.next_phase) {
@@ -554,7 +550,7 @@ function updateDisplay() {
   } else {
     progressPercent = 100;
   }
-  progressFillElem.style.width = `${progressPercent}%`;
+  if(progressFillElem) progressFillElem.style.width = `${progressPercent}%`;
 }
 
 function addMessageToLog(speaker, message, type = '') {
@@ -617,7 +613,7 @@ function saveApiKey() {
   }
 }
 
-function showApiSetup() { apiSetupSection.classList.add('show'); }
+function showApiSetup() { if(apiSetupSection) apiSetupSection.classList.add('show'); }
 
 function addInitialAiGreeting() {
   if (aiState.dialogue_history.length > 0 && aiState.dialogue_history[aiState.dialogue_history.length - 1].role === 'model') return;
@@ -641,11 +637,11 @@ async function sendMessage() {
   userInput.value = '';
   sendButton.disabled = true;
   userInput.disabled = true;
-  loadingIndicator.style.display = 'block';
+  if(loadingIndicator) loadingIndicator.style.display = 'block';
 
   if (speechBubbleTimeout) clearTimeout(speechBubbleTimeout);
-  aiSpeechText.innerHTML = `${AI_NAME}考え中... 🤔`;
-  aiSpeechBubble.style.display = 'flex';
+  if(aiSpeechText) aiSpeechText.innerHTML = `${AI_NAME}考え中... 🤔`;
+  if(aiSpeechBubble) aiSpeechBubble.style.display = 'flex';
 
   aiState.love += 1;
   updateTraitsFromUserUtterance(userText);
@@ -692,12 +688,12 @@ async function sendMessage() {
     addMessageToLog('システム', `エラー: ${error.message}`, 'system-error');
     if(aiSpeechText) aiSpeechText.textContent = `あれれ？${AI_NAME}、こまっちゃったみたい…`;
   } finally {
-    loadingIndicator.style.display = 'none';
-    sendButton.disabled = false;
-    userInput.disabled = false;
+    if(loadingIndicator) loadingIndicator.style.display = 'none';
+    if(sendButton) sendButton.disabled = false;
+    if(userInput) userInput.disabled = false;
     updateDisplay();
     saveAiState();
-    userInput.focus();
+    if(userInput) userInput.focus();
   }
 }
 
@@ -813,7 +809,7 @@ function showStatus() {
     </div>
     <hr style="margin: 10px 0;">
     ${vocabDetails}
-    <button onclick="document.getElementById('statusModalContainer').remove()" style="margin-top: 15px; padding: 10px 20px; background: #ff758c; color: white; border: none; border-radius: 5px; cursor: pointer; display:block; margin-left:auto; margin-right:auto;">閉じる</button>
+    <button onclick="document.getElementById('statusModalContainer').remove()" style="margin-top: 15px; padding: 10px 20px; background: #ff758c; color: white; border: none; border-radius: 5一遍; cursor: pointer; display:block; margin-left:auto; margin-right:auto;">閉じる</button>
   `;
   statusModalContainer.appendChild(div);
   document.body.appendChild(statusModalContainer);
@@ -1418,13 +1414,46 @@ function startGameShiritori() {
 
   shiritoriChainCount = 0;
   gameScore = 0;
+  shiritoriUsedWords = new Set(); // 🌟 リセット
   
   document.getElementById('shiritoriChainCount').textContent = shiritoriChainCount;
   document.getElementById('shiritoriScore').textContent = gameScore;
   document.getElementById('shiritoriMessage').textContent =
     `${AI_NAME}「AIは、次にどの言葉が出やすいか『確率（分布）』で考えているんだ。やってみよう！」`;
   
-  startNew連想Round("ごはん"); 
+  startNew連想Round("たべもの"); 
+}
+
+function getNewTopicFromVocabulary() {
+    const masteredWords = Object.keys(aiState.vocabulary).filter(w => 
+        aiState.vocabulary[w].mastered && 
+        w.length >= 2 && 
+        !shiritoriUsedWords.has(w)
+    );
+
+    if (masteredWords.length > 0) {
+        return masteredWords[Math.floor(Math.random() * masteredWords.length)];
+    }
+    return ["ねこ", "あそび", "がっこう", "くるま", "うみ"][Math.floor(Math.random() * 5)];
+}
+
+function getFallbackCandidates(topicWord) {
+    const candidates = new Set();
+    const allWords = Object.keys(aiState.vocabulary);
+    
+    allWords.filter(w => w.includes(topicWord) && w !== topicWord).slice(0, 3).forEach(w => candidates.add(w));
+
+    allWords.filter(w => aiState.vocabulary[w].count > 5).sort((a, b) => aiState.vocabulary[b].count - aiState.vocabulary[a].count).slice(0, 3).forEach(w => candidates.add(w));
+
+    ["たのしい", "わくわく", "ともだち", "きらきら", "やさしい"].forEach(w => candidates.add(w));
+
+    const filtered = Array.from(candidates).filter(w => 
+        w.length > 1 && 
+        !w.includes('ん') && 
+        !shiritoriUsedWords.has(w.toLowerCase())
+    );
+
+    return filtered.slice(0, 8); 
 }
 
 async function startNew連想Round(topicWord) {
@@ -1438,31 +1467,48 @@ async function startNew連想Round(topicWord) {
 
     messageElem.textContent = `${AI_NAME}が「${topicWord}」から連想する言葉を考え中...`;
 
-    const prompt = `以下の単語から連想される単語を${连想候補数}つ、簡潔に返してください。単語は半角スペースで区切ってください。句読点や余計な語は含めないでください。ただし出力は同じ入力語でも毎回新しい${连想候補数}つを考えてください。
+    const prompt = `以下の単語から連想される単語を${連想候補数}つ、簡潔に返してください。単語は半角スペースで区切ってください。句読点や余計な語は含めないでください。既に使った単語や、「ん」で終わる単語は使わないでください。
 入力: りんご
 出力: あか おいしい フルーツ あまい くだもの
 入力: ${topicWord}
 出力: `;
 
-    let aiResponse = "";
+    let rawCandidates = [];
     if (geminiApiKey) {
         try {
-            aiResponse = await callGeminiAPI(prompt, true);
+            const aiResponse = await callGeminiAPI(prompt, true);
+            rawCandidates = aiResponse.split(/\s+/).filter(w => 
+                w.length > 0 && 
+                w.length <= 5 && 
+                !w.includes('ん') && 
+                !shiritoriUsedWords.has(w.toLowerCase())
+            );
         } catch(e) {
-            aiResponse = "たのしい おもちゃ ぷぷ そら みず"; 
+            rawCandidates = getFallbackCandidates(topicWord); 
         }
     } else {
-        aiResponse = "たのしい おもちゃ ぷぷ そら みず";
+        rawCandidates = getFallbackCandidates(topicWord);
     }
-
-    let rawCandidates = aiResponse.split(/\s+/).filter(w => w.length > 0 && w.length <= 5 && !w.includes('ん'));
     
-    const candidatesWithScore = rawCandidates.slice(0,连想候補数).map((word, index) => ({
+    if (rawCandidates.length < 3) {
+         rawCandidates.push(...getFallbackCandidates("汎用")); 
+    }
+    
+    const uniqueCandidates = Array.from(new Set(rawCandidates)).filter(w => !shiritoriUsedWords.has(w.toLowerCase()));
+    
+    const candidatesWithScore = uniqueCandidates.slice(0, 連想候補数).map((word, index) => ({
         word: word,
-        score: (连想候補数 - index) * 10, 
+        score: (連想候補数 - index) * 10, 
         isHighProbability: index < 2 
     }));
 
+    if (candidatesWithScore.length < 3) {
+        messageElem.textContent = `${AI_NAME}「うーん、連想できる言葉が少ないね。ちょっと気分を変えて…新しいテーマだよ！」`;
+        const newTopic = getNewTopicFromVocabulary();
+        setTimeout(() => startNew連想Round(newTopic), 2500);
+        return;
+    }
+    
     candidatesWithScore.sort(() => 0.5 - Math.random());
     
     candidatesWithScore.forEach(candidate => {
@@ -1496,11 +1542,19 @@ function handle連想Guess(guessedWord, score, isHighProbability, allCandidates)
         gameScore += reward;
         shiritoriChainCount++;
         messageElem.textContent = `🎉 **大連想！** これぞぷぷが最も連想しやすい言葉！ (+${reward}点, 連鎖+1)`;
+        shiritoriUsedWords.add(guessedWord.toLowerCase());
+        
+        setTimeout(() => startNew連想Round(guessedWord), 2500);
+
     } else {
         reward = baseScore;
         gameScore += reward;
         shiritoriChainCount = 0; 
-        messageElem.textContent = `不正解！これはぷぷにとって低確率な連想だったみたい。連鎖リセット... (+${reward}点)`;
+        messageElem.textContent = `⭕ 正解！これはぷぷにとって低確率な連想だったみたい。連鎖リセット... (+${reward}点)`;
+        
+        const newTopic = getNewTopicFromVocabulary();
+        shiritoriUsedWords.add(guessedWord.toLowerCase());
+        setTimeout(() => startNew連想Round(newTopic), 2500);
     }
     
     document.getElementById('shiritoriChainCount').textContent = shiritoriChainCount;
@@ -1522,8 +1576,6 @@ function handle連想Guess(guessedWord, score, isHighProbability, allCandidates)
     gainXp(10 + shiritoriChainCount * 3);
     aiState.love += 5; 
     updateDisplay();
-
-    setTimeout(() => startNew連想Round(guessedWord), 2500);
 }
 
 
@@ -1531,7 +1583,9 @@ function handle連想Guess(guessedWord, score, isHighProbability, allCandidates)
 function closeMiniGameModal() {
   if (gameTimer) clearInterval(gameTimer);
   gameTimer = null;
+  
   miniGameModal.style.display = 'none';
+  currentGame = null; 
 
   if(userInput && !userInput.disabled) userInput.focus();
   
@@ -1589,7 +1643,6 @@ function endGame(gameType, resultMessage) {
 function initialize() {
   setupDummyDOM();
   
-  // DOM要素取得 (実際のHTML構造に合わせて修正してください)
   loveCountElem = document.getElementById('loveCount');
   chatArea = document.getElementById('chatArea');
   userInput = document.getElementById('userInput');
@@ -1659,5 +1712,3 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
-
-
