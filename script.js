@@ -1626,7 +1626,7 @@ function endGame(gameType, resultMessage) {
         pupuMessage = `連想ゲームおしまい！最終スコア: ${gameScore}点。\nAIが言葉を確率（分布）でつなぐ感覚がわかったかな？ (+${loveBonus} 愛情度)`;
     }
 
-    document.getElementById('closeMiniGameBtn').textContent = "わかった！閉じる"; 
+    document.getElementById('closeMiniGameBtn').textContent = "✕"; 
     
     if (messageElem) messageElem.textContent = resultMessage + `\n${AI_NAME}「${pupuMessage}」`;
 
@@ -1712,3 +1712,4 @@ function initialize() {
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
+
